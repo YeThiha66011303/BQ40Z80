@@ -1,6 +1,7 @@
 #include "BQ40Z80.h"
 #include "driver/gpio.h"
 #include "esp_rom_sys.h"
+#include <cstring>
 
 // =============================================================================
 // Construction / lifecycle
@@ -378,6 +379,7 @@ esp_err_t BQ40Z80::readDAStatus1(DAStatus1 &out) {
 
     out.rawLen = rawLen;
     if (rawLen < 32) return ESP_ERR_INVALID_SIZE; // shouldn't happen, but guard anyway
+    memcpy(out.raw, raw, 32);
 
     // Little-endian int16_t words, in the confirmed field order.
     int16_t *words = reinterpret_cast<int16_t *>(raw);
@@ -410,9 +412,47 @@ esp_err_t BQ40Z80::getBatVoltage(uint16_t &mV) {
     return err;
 }
 
-// ---- DAStatus3 (0x007B) -- raw bytes only; cell5/6 field layout not yet --------
-// ---- confirmed against TRM body text, so we do not parse it here yet. ---------
+// ---- DAStatus3 (0x007B) -- confirmed 9-word interleaved layout, see struct ---
+// ---- comment above (TRM SLUUBT5C page 143, sec 18.1.63) ----------------------
 esp_err_t BQ40Z80::readDAStatus3(DAStatus3 &out) {
-    return manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::DAStatus3),
-                                  out.raw, out.rawLen, sizeof(out.raw));
+    uint8_t raw[18] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::DAStatus3),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+
+    out.rawLen = rawLen;
+    if (rawLen < 18) return ESP_ERR_INVALID_SIZE; // shouldn't happen, but guard anyway
+    memcpy(out.raw, raw, 18);
+
+    int16_t *words = reinterpret_cast<int16_t *>(raw);
+    out.cellVoltage5_mV = words[0];
+    out.cellCurrent5_mA = words[1];
+    out.cellPower5      = words[2];
+    out.cellVoltage6_mV = words[3];
+    out.cellCurrent6_mA = words[4];
+    out.cellPower6      = words[5];
+    out.cellVoltage7_mV = words[6];
+    out.cellCurrent7_mA = words[7];
+    out.cellPower7      = words[8];
+
+    return ESP_OK;
+}
+
+esp_err_t BQ40Z80::getCellVoltage5(uint16_t &mV) {
+    DAStatus3 status = {};
+    esp_err_t err = readDAStatus3(status);
+    if (err == ESP_OK) {
+        mV = (uint16_t)status.cellVoltage5_mV;
+    }
+    return err;
+}
+
+esp_err_t BQ40Z80::getCellVoltage6(uint16_t &mV) {
+    DAStatus3 status = {};
+    esp_err_t err = readDAStatus3(status);
+    if (err == ESP_OK) {
+        mV = (uint16_t)status.cellVoltage6_mV;
+    }
+    return err;
 }

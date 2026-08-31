@@ -145,14 +145,25 @@ struct DAStatus1 {
     int16_t cellPower4;
     int16_t allCellPower;
     int16_t averagePower;
+    uint8_t raw[32];            // raw bytes as received, for debugging/verification
     uint8_t rawLen;             // actual bytes returned by device (should be 32)
 };
 
 struct DAStatus3 {
-    // PLACEHOLDER -- field layout not yet mapped. Raw bytes preserved so
-    // nothing is lost; parse once the TRM table is confirmed.
-    uint8_t raw[32];
-    uint8_t rawLen;
+    // Confirmed directly from BQ40Z80 TRM (SLUUBT5C, page 143, sec 18.1.63):
+    // 18 bytes = 9 little-endian int16_t words, interleaved per cell as
+    // (voltage, current, power) for cells 5, 6, 7 in that order.
+    int16_t cellVoltage5_mV;
+    int16_t cellCurrent5_mA;
+    int16_t cellPower5;      // cW
+    int16_t cellVoltage6_mV;
+    int16_t cellCurrent6_mA;
+    int16_t cellPower6;      // cW
+    int16_t cellVoltage7_mV;
+    int16_t cellCurrent7_mA;
+    int16_t cellPower7;      // cW
+    uint8_t raw[18];         // raw bytes as received, for debugging/verification
+    uint8_t rawLen;          // actual bytes returned by device (should be 18)
 };
 
 // =============================================================================
@@ -255,7 +266,13 @@ public:
     // calibration this chip has not yet received).
     esp_err_t readDAStatus1(DAStatus1 &out);
     esp_err_t getBatVoltage(uint16_t &mV);
+    // DAStatus3 field layout confirmed (TRM SLUUBT5C page 143, sec 18.1.63).
+    // getCellVoltage5()/6() are convenience wrappers, matching the pattern of
+    // getCellVoltage1()-4() above but sourced from this block instead of a
+    // standalone word command (cells 5-7 have no standalone SBS command).
     esp_err_t readDAStatus3(DAStatus3 &out);
+    esp_err_t getCellVoltage5(uint16_t &mV);
+    esp_err_t getCellVoltage6(uint16_t &mV);
     esp_err_t getDeviceType(uint16_t &type);
     esp_err_t getFirmwareVersion(uint8_t *buf, uint8_t &len, uint8_t maxLen);
 
