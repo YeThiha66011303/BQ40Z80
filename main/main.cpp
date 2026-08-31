@@ -5,10 +5,12 @@
 
 static const char *TAG = "app_main";
 
+#define SDA_PIN GPIO_NUM_11
+#define SCL_PIN GPIO_NUM_12
+
 extern "C" void app_main(void)
 {
-    
-    BQ40Z80 gauge(GPIO_NUM_9 /*SCL*/, GPIO_NUM_8 /*SDA*/, I2C_NUM_0);
+    BQ40Z80 gauge(SCL_PIN, SDA_PIN, I2C_NUM_0);
 
     esp_err_t err = gauge.begin();
     if (err != ESP_OK) {
