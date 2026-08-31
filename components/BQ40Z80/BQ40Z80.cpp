@@ -124,8 +124,6 @@ esp_err_t BQ40Z80::smbusWriteWordOnce(uint8_t command, uint16_t value) {
 
 // =============================================================================
 // Layer 1: block read/write, e.g. ManufacturerName(), ManufacturerData(), etc.
-// SMBus block protocol: command byte, then a device-reported byte-count byte,
-// then that many data bytes, then PEC (if enabled).
 // =============================================================================
 esp_err_t BQ40Z80::smbusReadBlockOnce(uint8_t command, uint8_t *data, uint8_t &len, uint8_t maxLen) {
     if (!initialized_) return ESP_ERR_INVALID_STATE;
@@ -142,12 +140,6 @@ esp_err_t BQ40Z80::smbusReadBlockOnce(uint8_t command, uint8_t *data, uint8_t &l
     i2c_master_write_byte(cmd, (uint8_t)((address_ << 1) | I2C_MASTER_READ), true);
     i2c_master_read_byte(cmd, &countByte, I2C_MASTER_ACK);
 
-    // We don't know countByte's value yet at command-build time (the i2c
-    // driver requires the read length to be fixed when the command list is
-    // built), so we conservatively queue reads for the max block size (32
-    // bytes) and only interpret the first countByte of them afterward. The
-    // very last byte read in the transaction must be NACK'd to terminate it
-    // correctly -- which byte that is depends on whether PEC is enabled.
     for (int i = 0; i < 32; i++) {
         bool isLastByte = (i == 31) && !pecEnabled_;
         i2c_master_read_byte(cmd, &buf[i], isLastByte ? I2C_MASTER_NACK : I2C_MASTER_ACK);
@@ -212,21 +204,14 @@ esp_err_t BQ40Z80::smbusWriteBlockOnce(uint8_t command, const uint8_t *data, uin
     return err;
 }
 
-// =============================================================================
-// Bus recovery: manually bit-bang up to 9 SCL pulses (releasing the I2C
-// peripheral's control of the pins temporarily) to force a wedged slave to
-// release SDA, then issue a manual STOP condition, then reinitialize the I2C
-// driver. Standard I2C/SMBus bus-recovery pattern -- not BQ40Z80-specific.
-// =============================================================================
+
 esp_err_t BQ40Z80::recoverBus() {
     if (initialized_) {
         i2c_driver_delete(port_);
         initialized_ = false;
     }
 
-    // Configure both lines as open-drain GPIO so we can bit-bang them like
-    // the bus naturally works: only ever drive low, or release (let the
-    // external pull-up bring the line high).
+
     gpio_config_t ioConf = {};
     ioConf.mode = GPIO_MODE_INPUT_OUTPUT_OD;
     ioConf.pull_up_en = GPIO_PULLUP_DISABLE; // external pull-ups already present
@@ -243,7 +228,7 @@ esp_err_t BQ40Z80::recoverBus() {
     for (int i = 0; i < 9; i++) {
         if (gpio_get_level(sdaPin_) == 1) {
             sdaFreed = true;
-            break; // slave already released the bus
+            break; 
         }
         gpio_set_level(sclPin_, 0);
         esp_rom_delay_us(5);
@@ -251,7 +236,7 @@ esp_err_t BQ40Z80::recoverBus() {
         esp_rom_delay_us(5);
     }
 
-    // Manual STOP condition: SDA low->high while SCL is high.
+
     gpio_set_level(sdaPin_, 0);
     esp_rom_delay_us(5);
     gpio_set_level(sclPin_, 1);
@@ -259,7 +244,7 @@ esp_err_t BQ40Z80::recoverBus() {
     gpio_set_level(sdaPin_, 1);
     esp_rom_delay_us(5);
 
-    // Hand the pins back to the I2C peripheral.
+  
     esp_err_t err = begin();
     if (err != ESP_OK) return err;
 
@@ -268,7 +253,6 @@ esp_err_t BQ40Z80::recoverBus() {
 
 // =============================================================================
 // Public Layer 1 wrappers: one automatic recoverBus() + retry on
-// ESP_ERR_TIMEOUT, so a wedged bus self-heals instead of failing forever.
 // =============================================================================
 esp_err_t BQ40Z80::smbusReadWord(uint8_t command, uint16_t &value) {
     esp_err_t err = smbusReadWordOnce(command, value);
@@ -355,7 +339,6 @@ esp_err_t BQ40Z80::getCurrent(int16_t &mA) {
     return err;
 }
 
-// ---- Individual cell voltages (confirmed direct word reads, cells 1-4) --------
 esp_err_t BQ40Z80::getCellVoltage1(uint16_t &mV) {
     return smbusReadWord(static_cast<uint8_t>(SbsCommand::CellVoltage1), mV);
 }
@@ -369,7 +352,6 @@ esp_err_t BQ40Z80::getCellVoltage4(uint16_t &mV) {
     return smbusReadWord(static_cast<uint8_t>(SbsCommand::CellVoltage4), mV);
 }
 
-// ---- DAStatus1 (0x0071) -- confirmed 16-word layout, see struct comment ------
 esp_err_t BQ40Z80::readDAStatus1(DAStatus1 &out) {
     uint8_t raw[32] = {0};
     uint8_t rawLen = 0;
@@ -378,10 +360,9 @@ esp_err_t BQ40Z80::readDAStatus1(DAStatus1 &out) {
     if (err != ESP_OK) return err;
 
     out.rawLen = rawLen;
-    if (rawLen < 32) return ESP_ERR_INVALID_SIZE; // shouldn't happen, but guard anyway
+    if (rawLen < 32) return ESP_ERR_INVALID_SIZE; 
     memcpy(out.raw, raw, 32);
 
-    // Little-endian int16_t words, in the confirmed field order.
     int16_t *words = reinterpret_cast<int16_t *>(raw);
     out.cellVoltage1_mV = words[0];
     out.cellVoltage2_mV = words[1];
@@ -412,8 +393,6 @@ esp_err_t BQ40Z80::getBatVoltage(uint16_t &mV) {
     return err;
 }
 
-// ---- DAStatus3 (0x007B) -- confirmed 9-word interleaved layout, see struct ---
-// ---- comment above (TRM SLUUBT5C page 143, sec 18.1.63) ----------------------
 esp_err_t BQ40Z80::readDAStatus3(DAStatus3 &out) {
     uint8_t raw[18] = {0};
     uint8_t rawLen = 0;

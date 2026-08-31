@@ -23,21 +23,9 @@
 //                                        Unsealed / Full Access mode.
 //   Layer 5  High-level convenience   - unseal(), reset(), etc. (built from
 //                                        Layers 3/4)
-//
-// !!! IMPORTANT - READ BEFORE USING ANYTHING MARKED "VERIFY vs TRM" !!!
-// Standard SBS commands (Layer 2) are part of the Smart Battery Data spec and
-// are safe to trust as-is. Anything BQ40Z80-specific -- ManufacturerAccess
-// subcommand codes, unseal/full-access keys, and ALL data flash addresses --
-// varies by firmware/configuration and is marked "VERIFY vs TRM" below as a
-// placeholder. Confirm every one of these against YOUR device's Technical
-// Reference Manual (SLUUBT5x) and/or .gg/.dffs data flash export BEFORE
-// issuing any write. An incorrect data flash write can corrupt configuration
-// or, in the worst case, leave the device permanently sealed/unusable.
-// =============================================================================
 
 // -----------------------------------------------------------------------------
 // Layer 2: Standard SBS command codes (Smart Battery Data spec, rev 1.1)
-// These are stable and safe -- identical across essentially all SBS gauges.
 // -----------------------------------------------------------------------------
 enum class SbsCommand : uint8_t {
     ManufacturerAccess     = 0x00,
@@ -84,7 +72,6 @@ enum class SbsCommand : uint8_t {
 
 // -----------------------------------------------------------------------------
 // Layer 3: ManufacturerAccess() / ManufacturerBlockAccess() subcommands.
-// PLACEHOLDERS -- confirm every value against your BQ40Z80 TRM before use.
 // -----------------------------------------------------------------------------
 enum class MfaSubcommand : uint16_t {
     DeviceType      = 0x0001,  // VERIFY vs TRM
@@ -114,21 +101,14 @@ enum class MfaSubcommand : uint16_t {
     LifetimeDataCollection = 0x0023, // Confirmed vs TRM SLUUBT5C sec 18.1.20
     PermanentFailure = 0x0024, // Confirmed vs TRM SLUUBT5C sec 18.1.21
 
-    // Additional subcommands (SafetyAlert, SafetyStatus, PFAlert, PFStatus,
-    // OperationStatus, Authenticate, Unseal-related keys, etc.) to be added
-    // here once confirmed vs TRM.
+
 };
 
 // -----------------------------------------------------------------------------
 // Parsed result structs for extended (Layer 3) block reads
 // -----------------------------------------------------------------------------
 struct DAStatus1 {
-    // Layout cross-validated against: (1) TI E2E forum confirming DAStatus1
-    // returns "cell voltages, pack voltage, bat voltage, cell currents, cell
-    // powers, power, and average power" as a 32-byte block, and (2) matches
-    // real-world field order/units used by multiple independent BQ40-family
-    // SBS drivers. All fields are little-endian int16_t words (16 words = 32
-    // bytes total, matching TI's confirmed block size).
+
     int16_t cellVoltage1_mV;
     int16_t cellVoltage2_mV;
     int16_t cellVoltage3_mV;
@@ -150,9 +130,7 @@ struct DAStatus1 {
 };
 
 struct DAStatus3 {
-    // Confirmed directly from BQ40Z80 TRM (SLUUBT5C, page 143, sec 18.1.63):
-    // 18 bytes = 9 little-endian int16_t words, interleaved per cell as
-    // (voltage, current, power) for cells 5, 6, 7 in that order.
+
     int16_t cellVoltage5_mV;
     int16_t cellCurrent5_mA;
     int16_t cellPower5;      // cW
@@ -173,28 +151,23 @@ class BQ40Z80 {
 public:
     static constexpr uint8_t  kDefaultAddress = 0x0B;
 
-    // PLACEHOLDERS -- TI's commonly-published default unseal/full-access keys
-    // are shown split into two 16-bit words below for reference, but keys are
-    // frequently changed per-customer in production firmware. Do not assume
-    // these are correct for your specific pack; verify before use.
-    static constexpr uint16_t kDefaultUnsealKeyWord1     = 0x0414;  // VERIFY vs TRM / your pack
-    static constexpr uint16_t kDefaultUnsealKeyWord2     = 0x3672;  // VERIFY vs TRM / your pack
-    static constexpr uint16_t kDefaultFullAccessKeyWord1 = 0xFFFF;  // VERIFY vs TRM / your pack
-    static constexpr uint16_t kDefaultFullAccessKeyWord2 = 0xFFFF;  // VERIFY vs TRM / your pack
+
+    static constexpr uint16_t kDefaultUnsealKeyWord1     = 0x0414;  
+    static constexpr uint16_t kDefaultUnsealKeyWord2     = 0x3672;  
+    static constexpr uint16_t kDefaultFullAccessKeyWord1 = 0xFFFF; 
+    static constexpr uint16_t kDefaultFullAccessKeyWord2 = 0xFFFF; 
 
     // ---- Construction / lifecycle ------------------------------------------
     BQ40Z80(gpio_num_t sclPin, gpio_num_t sdaPin, i2c_port_t port,
             uint8_t deviceAddress = kDefaultAddress, uint32_t clockHz = 100000);
     ~BQ40Z80();
 
-    // Installs and configures the I2C driver on the given port/pins.
-    // Must be called once before any other method.
+
     esp_err_t begin();
 
     void setPecEnabled(bool enabled) { pecEnabled_ = enabled; }
     bool getPecEnabled() const { return pecEnabled_; }
 
-    // ---- Layer 2: standard SBS getters (word-based) -------------------------
     esp_err_t getVoltage(uint16_t &mV);
     esp_err_t getCurrent(int16_t &mA);
     esp_err_t getAverageCurrent(int16_t &mA);
@@ -213,72 +186,34 @@ public:
     esp_err_t getDesignCapacity(uint16_t &mAh);
     esp_err_t getDesignVoltage(uint16_t &mV);
     esp_err_t getSerialNumber(uint16_t &serial);
-    esp_err_t getManufactureDate(uint16_t &packedDate);   // (year-1980)<<9 | month<<5 | day
+    esp_err_t getManufactureDate(uint16_t &packedDate);   
 
-    // ---- Layer 2: individual cell voltages (confirmed direct word reads, cells 1-4) --
     esp_err_t getCellVoltage1(uint16_t &mV);
     esp_err_t getCellVoltage2(uint16_t &mV);
     esp_err_t getCellVoltage3(uint16_t &mV);
     esp_err_t getCellVoltage4(uint16_t &mV);
-    // Cells 5-6 (6S pack) are not exposed as simple word commands -- they come from
-    // the DAStatus3 block (0x007B). See readDAStatus3() below; byte-level field
-    // layout for cells 5/6 within that block is not yet confirmed against TRM body
-    // text, so raw bytes are returned in DAStatus3::raw rather than parsed values.
 
-    // ---- Layer 2: standard SBS getters (block-based, null-terminates buf) ---
     esp_err_t getManufacturerName(char *buf, size_t bufLen);
     esp_err_t getDeviceName(char *buf, size_t bufLen);
     esp_err_t getDeviceChemistry(char *buf, size_t bufLen);
 
-    // ---- Layer 3/5: charge/discharge/precharge/pre-discharge FET control --------
-    // WARNING: these are RAM-only overrides of the firmware-controlled FETs.
-    // State is lost on reset or seal(); firmware protection logic (OVP/UVP/
-    // OCP/OTP etc.) still governs the FETs unless/until FET Control (0x0022)
-    // hands control to manual/host mode -- semantics of that handoff are not
-    // yet fully verified here (see MfaSubcommand::FetControl comment above).
-    // Confirm against TRM body text before relying on this in a product; do
-    // not assume the toggle methods alone will override a live protection trip.
-    //
-    // "Toggle" reflects the underlying MAC command semantics -- it flips
-    // current FET state rather than taking an explicit on/off argument.
-    // Read back actual FET state via BatteryStatus()/OperationStatus() bits
-    // (OperationStatus() subcommand TBD) rather than assuming toggle succeeded.
-    //
-    // toggleFuse() in particular may correspond to a physically one-way/
-    // destructive action (blowing an in-line fuse) depending on your board's
-    // FUSE pin circuit -- do not call this without confirming the TRM body
-    // text and your hardware design first.
     esp_err_t toggleChargeFet();
     esp_err_t toggleDischargeFet();
-    esp_err_t togglePrechargeFet();     // PCHG FET, 0x001E -- precharge path only
-    esp_err_t togglePreDischargeFet();  // PDSG FET, 0x001C -- pre-discharge path only
-    esp_err_t toggleFuse();             // 0x001D -- WARNING: can be a one-way/destructive
-                                         // blown-fuse action depending on hardware fuse
-                                         // design; confirm TRM body text + your board's
-                                         // fuse circuit before ever calling this.
-    esp_err_t setFetControlMode(bool manualControl); // semantics VERIFY vs TRM body text
+    esp_err_t togglePrechargeFet();     
+    esp_err_t togglePreDischargeFet();  
+    esp_err_t toggleFuse();            
+    esp_err_t setFetControlMode(bool manualControl); 
 
-    // ---- Layer 3: extended manufacturer block reads --------------------------
-    // DAStatus1 field layout confirmed (see struct comment above). getBatVoltage()
-    // is a convenience wrapper that calls readDAStatus1() and returns just the
-    // batVoltage_mV field -- this is the reliable total pack voltage reading
-    // (unlike the standard Voltage() SBS command, which needs per-channel
-    // calibration this chip has not yet received).
     esp_err_t readDAStatus1(DAStatus1 &out);
     esp_err_t getBatVoltage(uint16_t &mV);
-    // DAStatus3 field layout confirmed (TRM SLUUBT5C page 143, sec 18.1.63).
-    // getCellVoltage5()/6() are convenience wrappers, matching the pattern of
-    // getCellVoltage1()-4() above but sourced from this block instead of a
-    // standalone word command (cells 5-7 have no standalone SBS command).
+
     esp_err_t readDAStatus3(DAStatus3 &out);
     esp_err_t getCellVoltage5(uint16_t &mV);
     esp_err_t getCellVoltage6(uint16_t &mV);
     esp_err_t getDeviceType(uint16_t &type);
     esp_err_t getFirmwareVersion(uint8_t *buf, uint8_t &len, uint8_t maxLen);
 
-    // ---- Layer 3/5: security & lifecycle --------------------------------------
-    // Default-arg overloads use the placeholder keys above; pass your pack's
-    // real keys explicitly once confirmed.
+
     esp_err_t unseal(uint16_t keyWord1 = kDefaultUnsealKeyWord1,
                       uint16_t keyWord2 = kDefaultUnsealKeyWord2);
     esp_err_t fullAccess(uint16_t keyWord1 = kDefaultFullAccessKeyWord1,
@@ -286,8 +221,6 @@ public:
     esp_err_t seal();
     esp_err_t reset();
 
-    // ---- Layer 4: data flash (raw) --------------------------------------------
-    // Requires Unsealed (and, for some rows, Full Access) mode -- see above.
     esp_err_t readDataFlash(uint16_t flashAddress, uint8_t *data, uint8_t len);
     esp_err_t writeDataFlash(uint16_t flashAddress, const uint8_t *data, uint8_t len);
 
@@ -302,12 +235,6 @@ public:
     esp_err_t manufacturerBlockRead(uint16_t subcommand, uint8_t *data, uint8_t &len, uint8_t maxLen);
     esp_err_t manufacturerBlockWrite(uint16_t subcommand, const uint8_t *data, uint8_t len);
 
-    // ---- Bus recovery ---------------------------------------------------------
-    // Manually bit-bangs up to 9 SCL pulses (releasing the I2C peripheral's
-    // control of the pins temporarily) to force a wedged slave to release SDA,
-    // then issues a manual STOP condition, then reinitializes the I2C driver.
-    // Called automatically by the read/write primitives below on
-    // ESP_ERR_TIMEOUT (one retry); can also be called directly if desired.
     esp_err_t recoverBus();
 
 private:
@@ -319,12 +246,8 @@ private:
     bool        pecEnabled_  = true;
     bool        initialized_ = false;
 
-    // SMBus CRC-8 (poly x^8 + x^2 + x^1 + 1, init 0x00) over [addr+rw, cmd, data...]
     static uint8_t crc8Smbus(const uint8_t *data, size_t len);
 
-    // Single-attempt bodies (no retry/recovery) -- wrapped by the public
-    // smbusRead*/smbusWrite* methods, which add one automatic recoverBus()
-    // + retry on ESP_ERR_TIMEOUT.
     esp_err_t smbusReadWordOnce(uint8_t command, uint16_t &value);
     esp_err_t smbusWriteWordOnce(uint8_t command, uint16_t value);
     esp_err_t smbusReadBlockOnce(uint8_t command, uint8_t *data, uint8_t &len, uint8_t maxLen);

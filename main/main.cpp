@@ -6,8 +6,6 @@
 
 static const char *TAG = "app_main";
 
-// Confirmed from Arduino's official Nano ESP32 pinout diagram:
-// A4 (SDA) = GPIO11, A5 (SCL) = GPIO12
 #define SDA_PIN GPIO_NUM_11
 #define SCL_PIN GPIO_NUM_12
 
@@ -23,7 +21,6 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "BQ40Z80 initialized OK");
 
     while (1) {
-        // ---- Fetch everything first, print in organized order after -------
         uint16_t packMv = 0;
         int16_t  packMa = 0;
         esp_err_t vErr = gauge.getVoltage(packMv);
@@ -45,7 +42,6 @@ extern "C" void app_main(void)
         DAStatus3 da3 = {};
         esp_err_t da3Err = gauge.readDAStatus3(da3);
 
-        // ---- 1. Raw bytes -------------------------------------------------
         if (da1Err == ESP_OK) {
             char hex1[3 * 32 + 1] = {0};
             for (int i = 0; i < da1.rawLen && i < 32; i++) {
@@ -66,7 +62,6 @@ extern "C" void app_main(void)
             ESP_LOGE(TAG, "readDAStatus3() failed: %s", esp_err_to_name(da3Err));
         }
 
-        // ---- 2. Cell voltages, all sources, grouped together --------------
         if (da1Err == ESP_OK) {
             ESP_LOGI(TAG, "[DAStatus1] Cell1: %d mV, Cell2: %d mV, Cell3: %d mV, Cell4: %d mV",
                      da1.cellVoltage1_mV, da1.cellVoltage2_mV, da1.cellVoltage3_mV, da1.cellVoltage4_mV);
@@ -83,7 +78,6 @@ extern "C" void app_main(void)
             }
         }
 
-        // ---- 3. Everything else --------------------------------------------
         if (batErr == ESP_OK) {
             ESP_LOGI(TAG, "Total Battery Voltage (DAStatus1 BAT): %u mV", batMv);
         } else {
