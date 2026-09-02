@@ -9,6 +9,8 @@ static const char *TAG = "app_main";
 #define SDA_PIN GPIO_NUM_11
 #define SCL_PIN GPIO_NUM_12
 
+#define RUN_FET_TOGGLE_TEST 0
+
 extern "C" void app_main(void)
 {
     BQ40Z80 gauge(SCL_PIN, SDA_PIN, I2C_NUM_0);
@@ -20,7 +22,114 @@ extern "C" void app_main(void)
     }
     ESP_LOGI(TAG, "BQ40Z80 initialized OK");
 
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    ManufacturingStatus mfgBefore = {};
+    esp_err_t mfgBeforeErr = ESP_FAIL;
+    const int kMaxMfgReadAttempts = 40;
+    for (int attempt = 1; attempt <= kMaxMfgReadAttempts; attempt++) {
+        mfgBeforeErr = gauge.getManufacturingStatus(mfgBefore);
+        if (mfgBeforeErr == ESP_OK) {
+            ESP_LOGI(TAG, "getManufacturingStatus() (pre-check) succeeded on attempt %d/%d",
+                     attempt, kMaxMfgReadAttempts);
+            break;
+        }
+        ESP_LOGW(TAG, "getManufacturingStatus() (pre-check) attempt %d/%d failed: %s -- retrying...",
+                 attempt, kMaxMfgReadAttempts, esp_err_to_name(mfgBeforeErr));
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+    if (mfgBeforeErr != ESP_OK) {
+        ESP_LOGE(TAG, "getManufacturingStatus() (pre-check) failed after %d attempts, giving up",
+                 kMaxMfgReadAttempts);
+    } else {
+        ESP_LOGI(TAG, "ManufacturingStatus before: raw=0x%04X GAUGE_EN=%d FET_EN=%d",
+                 mfgBefore.raw, mfgBefore.gaugeEn, mfgBefore.fetEn);
+
+        if (!mfgBefore.gaugeEn) {
+            ESP_LOGI(TAG, "GAUGE_EN is 0 -- toggling Gauging (0x0021)...");
+            esp_err_t e = gauge.toggleGaugingEnable();
+            ESP_LOGI(TAG, "toggleGaugingEnable() returned: %s", esp_err_to_name(e));
+            vTaskDelay(pdMS_TO_TICKS(300));
+        } else {
+            ESP_LOGI(TAG, "GAUGE_EN already 1 -- not toggling.");
+        }
+
+        if (!mfgBefore.fetEn) {
+            ESP_LOGI(TAG, "FET_EN is 0 -- toggling FET Control (0x0022)...");
+            esp_err_t e = gauge.toggleFetEnable();
+            ESP_LOGI(TAG, "toggleFetEnable() returned: %s", esp_err_to_name(e));
+            vTaskDelay(pdMS_TO_TICKS(300));
+        } else {
+            ESP_LOGI(TAG, "FET_EN already 1 -- not toggling.");
+        }
+
+
+        ManufacturingStatus mfgAfter = {};
+        esp_err_t mfgAfterErr = gauge.getManufacturingStatus(mfgAfter);
+        if (mfgAfterErr == ESP_OK) {
+            ESP_LOGI(TAG, "ManufacturingStatus after: raw=0x%04X GAUGE_EN=%d FET_EN=%d",
+                     mfgAfter.raw, mfgAfter.gaugeEn, mfgAfter.fetEn);
+        } else {
+            ESP_LOGE(TAG, "getManufacturingStatus() (verify) failed: %s", esp_err_to_name(mfgAfterErr));
+        }
+    }
+    vTaskDelay(pdMS_TO_TICKS(500)); 
+
+#if RUN_FET_TOGGLE_TEST
+
+    ESP_LOGI(TAG, "=== FET toggle test starting ===");
+
+    ESP_LOGI(TAG, "Step 1: toggling FET_EN off (manual control)...");
+    esp_err_t t1 = gauge.toggleFetEnable();
+    ESP_LOGI(TAG, "toggleFetEnable() returned: %s", esp_err_to_name(t1));
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    ManufacturingStatus mfgCheck = {};
+    if (gauge.getManufacturingStatus(mfgCheck) == ESP_OK) {
+        ESP_LOGI(TAG, "FET_EN now: %d (expect 0)", mfgCheck.fetEn);
+    }
+
+    OperationStatus opBefore = {};
+    gauge.getOperationStatus(opBefore);
+    ESP_LOGI(TAG, "Before CHG toggle: CHG FET=%d, DSG FET=%d", opBefore.chg, opBefore.dsg);
+
+    ESP_LOGI(TAG, "Step 2: toggling CHG FET...");
+    gauge.toggleChargeFet();
+    vTaskDelay(pdMS_TO_TICKS(500));
+    OperationStatus opAfterChg = {};
+    gauge.getOperationStatus(opAfterChg);
+    ESP_LOGI(TAG, "After CHG toggle: CHG FET=%d, DSG FET=%d", opAfterChg.chg, opAfterChg.dsg);
+
+    ESP_LOGI(TAG, "Toggling CHG FET back...");
+    gauge.toggleChargeFet();
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    ESP_LOGI(TAG, "Step 3: toggling DSG FET...");
+    gauge.toggleDischargeFet();
+    vTaskDelay(pdMS_TO_TICKS(500));
+    OperationStatus opAfterDsg = {};
+    gauge.getOperationStatus(opAfterDsg);
+    ESP_LOGI(TAG, "After DSG toggle: CHG FET=%d, DSG FET=%d", opAfterDsg.chg, opAfterDsg.dsg);
+
+    ESP_LOGI(TAG, "Toggling DSG FET back...");
+    gauge.toggleDischargeFet();
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    ESP_LOGI(TAG, "Step 4: restoring FET_EN to 1 (firmware control)...");
+    esp_err_t t4 = gauge.toggleFetEnable();
+    ESP_LOGI(TAG, "toggleFetEnable() returned: %s", esp_err_to_name(t4));
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    ManufacturingStatus mfgFinal = {};
+    if (gauge.getManufacturingStatus(mfgFinal) == ESP_OK) {
+        ESP_LOGI(TAG, "FET_EN now: %d (expect 1, back to firmware control)", mfgFinal.fetEn);
+    }
+    ESP_LOGI(TAG, "=== FET toggle test complete ===");
+#endif
+
     while (1) {
+
         uint16_t packMv = 0;
         int16_t  packMa = 0;
         esp_err_t vErr = gauge.getVoltage(packMv);
@@ -41,6 +150,15 @@ extern "C" void app_main(void)
 
         DAStatus3 da3 = {};
         esp_err_t da3Err = gauge.readDAStatus3(da3);
+
+        uint16_t tempDeciK = 0;
+        esp_err_t tempErr = gauge.getTemperature(tempDeciK);
+        if (tempErr == ESP_OK) {
+            float tempC = (tempDeciK / 10.0f) - 273.15f;
+            ESP_LOGI(TAG, "Temperature: %.1f C (raw: %u, 0.1K units)", tempC, tempDeciK);
+        } else {
+            ESP_LOGE(TAG, "getTemperature() failed: %s", esp_err_to_name(tempErr));
+        }
 
         if (da1Err == ESP_OK) {
             char hex1[3 * 32 + 1] = {0};
@@ -107,6 +225,126 @@ extern "C" void app_main(void)
             ESP_LOGI(TAG, "Pack Current: %d mA", packMa);
         } else {
             ESP_LOGE(TAG, "getCurrent() failed: %s", esp_err_to_name(iErr));
+        }
+
+        uint16_t battStatus = 0;
+        esp_err_t bsErr = gauge.getBatteryStatus(battStatus);
+        if (bsErr == ESP_OK) {
+            ESP_LOGI(TAG, "BatteryStatus raw: 0x%04X", battStatus);
+            ESP_LOGI(TAG, "  OverChargedAlarm:      %d", (battStatus >> 15) & 1);
+            ESP_LOGI(TAG, "  TerminateChargeAlarm:  %d", (battStatus >> 14) & 1);
+            ESP_LOGI(TAG, "  TerminateDischargeAlarm: %d", (battStatus >> 12) & 1);
+            ESP_LOGI(TAG, "  RemainingCapacityAlarm: %d", (battStatus >> 11) & 1);
+            ESP_LOGI(TAG, "  RemainingTimeAlarm:    %d", (battStatus >> 10) & 1);
+            ESP_LOGI(TAG, "  Initialized:           %d", (battStatus >> 8) & 1);
+            ESP_LOGI(TAG, "  Discharging:           %d", (battStatus >> 7) & 1);
+            ESP_LOGI(TAG, "  FullyCharged:          %d", (battStatus >> 6) & 1);
+            ESP_LOGI(TAG, "  FullyDischarged:       %d", (battStatus >> 5) & 1);
+            ESP_LOGI(TAG, "  ErrorCode (bits 0-3):  %d", battStatus & 0x0F);
+        } else {
+            ESP_LOGE(TAG, "getBatteryStatus() failed: %s", esp_err_to_name(bsErr));
+        }
+
+        OperationStatus opStatus = {};
+        esp_err_t opErr = gauge.getOperationStatus(opStatus);
+        if (opErr == ESP_OK) {
+            ESP_LOGI(TAG, "OperationStatus raw: 0x%08lX", (unsigned long)opStatus.raw);
+            ESP_LOGI(TAG, "  Security mode: %s (SEC=%d)", operationStatusSecName(opStatus.sec), opStatus.sec);
+            ESP_LOGI(TAG, "  ChargingDisabled(XCHG): %d, DischargingDisabled(XDSG): %d",
+                     opStatus.xchg, opStatus.xdsg);
+            ESP_LOGI(TAG, "  SafetyStatusActive(SS): %d, PermanentFailure(PF): %d, BTP_INT: %d",
+                     opStatus.ss, opStatus.pf, opStatus.btpInt);
+            ESP_LOGI(TAG, "  CHG FET: %d, DSG FET: %d, PCHG FET: %d, PDSG FET: %d, FUSE: %d",
+                     opStatus.chg, opStatus.dsg, opStatus.pchg, opStatus.pdsg, opStatus.fuse);
+            ESP_LOGI(TAG, "  Present(PRES): %d, Initialized(INIT): %d, Sleep: %d",
+                     opStatus.pres, opStatus.init, opStatus.sleep);
+        } else {
+            ESP_LOGE(TAG, "getOperationStatus() failed: %s", esp_err_to_name(opErr));
+        }
+
+        SafetyStatus safety = {};
+        esp_err_t safetyErr = gauge.getSafetyStatus(safety);
+        if (safetyErr == ESP_OK) {
+            ESP_LOGI(TAG, "SafetyStatus raw: 0x%08lX", (unsigned long)safety.raw);
+            if (safety.raw == 0) {
+                ESP_LOGI(TAG, "  No safety faults active.");
+            } else {
+                if (safety.ocdl)  ESP_LOGW(TAG, "  ACTIVE: OCDL  (Overcurrent in discharge, latched)");
+                if (safety.covl)  ESP_LOGW(TAG, "  ACTIVE: COVL  (Cell overvoltage, latched)");
+                if (safety.utd)   ESP_LOGW(TAG, "  ACTIVE: UTD   (Undertemperature during discharge)");
+                if (safety.utc)   ESP_LOGW(TAG, "  ACTIVE: UTC   (Undertemperature during charge)");
+                if (safety.pchgc) ESP_LOGW(TAG, "  ACTIVE: PCHGC (Over-precharge current)");
+                if (safety.chgv)  ESP_LOGW(TAG, "  ACTIVE: CHGV  (Overcharging voltage)");
+                if (safety.chgc)  ESP_LOGW(TAG, "  ACTIVE: CHGC  (Overcharging current)");
+                if (safety.oc)    ESP_LOGW(TAG, "  ACTIVE: OC    (Overcharge)");
+                if (safety.cto)   ESP_LOGW(TAG, "  ACTIVE: CTO   (Charge timeout)");
+                if (safety.pto)   ESP_LOGW(TAG, "  ACTIVE: PTO   (Precharge timeout)");
+                if (safety.otf)   ESP_LOGW(TAG, "  ACTIVE: OTF   (Overtemperature FET)");
+                if (safety.cuvc)  ESP_LOGW(TAG, "  ACTIVE: CUVC  (Cell undervoltage, compensated)");
+                if (safety.otd)   ESP_LOGW(TAG, "  ACTIVE: OTD   (Overtemperature during discharge)");
+                if (safety.otc)   ESP_LOGW(TAG, "  ACTIVE: OTC   (Overtemperature during charge)");
+                if (safety.ascdl) ESP_LOGW(TAG, "  ACTIVE: ASCDL (Short-circuit during discharge, latched)");
+                if (safety.ascd)  ESP_LOGW(TAG, "  ACTIVE: ASCD  (Short-circuit during discharge)");
+                if (safety.asccl) ESP_LOGW(TAG, "  ACTIVE: ASCCL (Short-circuit during charge, latched)");
+                if (safety.ascc)  ESP_LOGW(TAG, "  ACTIVE: ASCC  (Short-circuit during charge)");
+                if (safety.aoldl) ESP_LOGW(TAG, "  ACTIVE: AOLDL (Overload during discharge, latched)");
+                if (safety.aold)  ESP_LOGW(TAG, "  ACTIVE: AOLD  (Overload during discharge)");
+                if (safety.ocd2)  ESP_LOGW(TAG, "  ACTIVE: OCD2  (Overcurrent during discharge 2)");
+                if (safety.ocd1)  ESP_LOGW(TAG, "  ACTIVE: OCD1  (Overcurrent during discharge 1)");
+                if (safety.occ2)  ESP_LOGW(TAG, "  ACTIVE: OCC2  (Overcurrent during charge 2)");
+                if (safety.occ1)  ESP_LOGW(TAG, "  ACTIVE: OCC1  (Overcurrent during charge 1)");
+                if (safety.cov)   ESP_LOGW(TAG, "  ACTIVE: COV   (Cell overvoltage)");
+                if (safety.cuv)   ESP_LOGW(TAG, "  ACTIVE: CUV   (Cell undervoltage)");
+            }
+        } else {
+            ESP_LOGE(TAG, "getSafetyStatus() failed: %s", esp_err_to_name(safetyErr));
+        }
+
+        ManufacturingStatus mfgStatus = {};
+        esp_err_t mfgErr = gauge.getManufacturingStatus(mfgStatus);
+        if (mfgErr == ESP_OK) {
+            ESP_LOGI(TAG, "ManufacturingStatus raw: 0x%04X", mfgStatus.raw);
+            ESP_LOGI(TAG, "  FET_EN: %d (1=firmware controls FETs, 0=it does not)", mfgStatus.fetEn);
+            ESP_LOGI(TAG, "  GAUGE_EN: %d (1=gas gauging active, 0=disabled)", mfgStatus.gaugeEn);
+            ESP_LOGI(TAG, "  PF_EN: %d, LF_EN: %d, BBR_EN: %d", mfgStatus.pfEn, mfgStatus.lfEn, mfgStatus.bbrEn);
+        } else {
+            ESP_LOGE(TAG, "getManufacturingStatus() failed: %s", esp_err_to_name(mfgErr));
+        }
+
+        GaugingStatus3 gs3 = {};
+        esp_err_t gs3Err = gauge.getGaugingStatus3(gs3);
+        if (gs3Err == ESP_OK) {
+            ESP_LOGI(TAG, "QMax: Cell1=%d mAh, Cell2=%d mAh, Cell3=%d mAh, Cell4=%d mAh",
+                     gs3.qmax1_mAh, gs3.qmax2_mAh, gs3.qmax3_mAh, gs3.qmax4_mAh);
+            ESP_LOGI(TAG, "QMax DOD0: Cell1=%d, Cell2=%d, Cell3=%d, Cell4=%d",
+                     gs3.qmaxDod0_1, gs3.qmaxDod0_2, gs3.qmaxDod0_3, gs3.qmaxDod0_4);
+            ESP_LOGI(TAG, "QMax PassedQ: %d mAh, QMax Time: %d (hr/16)",
+                     gs3.qmaxPassedQ_mAh, gs3.qmaxTime);
+        } else {
+            ESP_LOGE(TAG, "getGaugingStatus3() failed: %s", esp_err_to_name(gs3Err));
+        }
+
+        uint16_t designCapMah = 0;
+        esp_err_t designCapErr = gauge.getDesignCapacity(designCapMah);
+        if (designCapErr == ESP_OK) {
+            ESP_LOGI(TAG, "DesignCapacity: %u mAh (manufacturer rated: 15000 mAh)", designCapMah);
+        } else {
+            ESP_LOGE(TAG, "getDesignCapacity() failed: %s", esp_err_to_name(designCapErr));
+        }
+
+        uint16_t remainCapMah = 0;
+        esp_err_t remainCapErr = gauge.getRemainingCapacity(remainCapMah);
+        uint16_t fullChargeCapMah = 0;
+        esp_err_t fullChargeCapErr = gauge.getFullChargeCapacity(fullChargeCapMah);
+        if (remainCapErr == ESP_OK) {
+            ESP_LOGI(TAG, "RemainingCapacity (live, right now): %u mAh", remainCapMah);
+        } else {
+            ESP_LOGE(TAG, "getRemainingCapacity() failed: %s", esp_err_to_name(remainCapErr));
+        }
+        if (fullChargeCapErr == ESP_OK) {
+            ESP_LOGI(TAG, "FullChargeCapacity (learned, updates over time): %u mAh", fullChargeCapMah);
+        } else {
+            ESP_LOGE(TAG, "getFullChargeCapacity() failed: %s", esp_err_to_name(fullChargeCapErr));
         }
 
         vTaskDelay(pdMS_TO_TICKS(2000));

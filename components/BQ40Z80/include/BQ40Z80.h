@@ -23,6 +23,7 @@
 //                                        Unsealed / Full Access mode.
 //   Layer 5  High-level convenience   - unseal(), reset(), etc. (built from
 //                                        Layers 3/4)
+// =============================================================================
 
 // -----------------------------------------------------------------------------
 // Layer 2: Standard SBS command codes (Smart Battery Data spec, rev 1.1)
@@ -63,7 +64,6 @@ enum class SbsCommand : uint8_t {
     ManufacturerData         = 0x23,   // block, paired with ManufacturerBlockAccess (0x44)
     ManufacturerBlockAccess  = 0x44,   // block
 
-    // --- Confirmed individual cell voltage commands (TI E2E forum, standard word reads) ---
     CellVoltage4    = 0x3C,
     CellVoltage3    = 0x3D,
     CellVoltage2    = 0x3E,
@@ -100,7 +100,11 @@ enum class MfaSubcommand : uint16_t {
                                 // yet confirmed here.
     LifetimeDataCollection = 0x0023, // Confirmed vs TRM SLUUBT5C sec 18.1.20
     PermanentFailure = 0x0024, // Confirmed vs TRM SLUUBT5C sec 18.1.21
-
+    DeviceReset      = 0x0041, // Confirmed vs TRM SLUUBT5C sec 18.1.36
+    OperationStatus  = 0x0054, // Confirmed vs TRM SLUUBT5C sec 18.1.41, bits confirmed
+    SafetyStatus     = 0x0051, // Confirmed vs TRM SLUUBT5C sec 18.1.38, bits confirmed
+    ManufacturingStatus = 0x0057, // Confirmed vs TRM SLUUBT5C sec 18.1.44, bits confirmed
+    GaugingStatus3   = 0x0075, // Confirmed vs TRM SLUUBT5C sec 18.1.57, layout confirmed
 
 };
 
@@ -108,7 +112,6 @@ enum class MfaSubcommand : uint16_t {
 // Parsed result structs for extended (Layer 3) block reads
 // -----------------------------------------------------------------------------
 struct DAStatus1 {
-
     int16_t cellVoltage1_mV;
     int16_t cellVoltage2_mV;
     int16_t cellVoltage3_mV;
@@ -130,7 +133,6 @@ struct DAStatus1 {
 };
 
 struct DAStatus3 {
-
     int16_t cellVoltage5_mV;
     int16_t cellCurrent5_mA;
     int16_t cellPower5;      // cW
@@ -144,6 +146,125 @@ struct DAStatus3 {
     uint8_t rawLen;          // actual bytes returned by device (should be 18)
 };
 
+struct OperationStatus {
+    // Confirmed directly from BQ40Z80 TRM (SLUUBT5C, page 129, sec 18.1.41).
+    bool iataCterm;   // Bit31: IATA charge control
+    bool emShut;      // Bit29: Emergency FET shutdown
+    bool cb;          // Bit28: Cell balancing status
+    bool slpCc;       // Bit27: CC measurement in SLEEP mode
+    bool slpAd;       // Bit26: ADC measurement in SLEEP mode
+    bool smblCal;     // Bit25: Auto CC calibration when bus is low
+    bool init;        // Bit24: Initialization after full reset
+    bool sleepM;      // Bit23: SLEEP mode triggered via command
+    bool xl;          // Bit22: 400-kHz SMBus mode
+    bool calOffset;   // Bit21: Calibration output (raw CC offset data)
+    bool cal;         // Bit20: Calibration output (raw ADC and CC data)
+    bool autoCalM;    // Bit19: Auto CC Offset calibration in progress
+    bool auth;        // Bit18: Authentication in progress
+    bool led;         // Bit17: LED display on/off
+    bool sdm;         // Bit16: Shutdown triggered via command
+    bool sleep;       // Bit15: SLEEP mode conditions met
+    bool xchg;        // Bit14: Charging disabled
+    bool xdsg;        // Bit13: Discharging disabled
+    bool pf;          // Bit12: PERMANENT FAILURE mode status
+    bool ss;          // Bit11: SAFETY status (OR of all Safety Status bits)
+    bool sdv;         // Bit10: Shutdown triggered via low battery voltage
+    uint8_t sec;      // Bits9-8: SECURITY mode (0=Reserved,1=FullAccess,2=Unsealed,3=Sealed)
+    bool btpInt;      // Bit7: Battery trip point interrupt
+    bool fuse;        // Bit5: Fuse status
+    bool pdsg;        // Bit4: Pre-discharge FET status
+    bool pchg;        // Bit3: Precharge FET status
+    bool chg;         // Bit2: CHG FET status
+    bool dsg;         // Bit1: DSG FET status
+    bool pres;        // Bit0: System present low
+    uint32_t raw;     // full raw value
+};
+
+inline const char *operationStatusSecName(uint8_t sec) {
+    switch (sec) {
+        case 0: return "Reserved";
+        case 1: return "FullAccess";
+        case 2: return "Unsealed";
+        case 3: return "Sealed";
+        default: return "?";
+    }
+}
+
+struct SafetyStatus {
+    // Confirmed directly from BQ40Z80 TRM (SLUUBT5C, page 123, sec 18.1.38).
+    bool ocdl;   // Bit29: Overcurrent in discharge (latch)
+    bool covl;   // Bit28: Cell overvoltage latch
+    bool utd;    // Bit27: Undertemperature during discharge
+    bool utc;    // Bit26: Undertemperature during charge
+    bool pchgc;  // Bit25: Over-precharge current
+    bool chgv;   // Bit24: Overcharging voltage
+    bool chgc;   // Bit23: Overcharging current
+    bool oc;     // Bit22: Overcharge
+    bool cto;    // Bit20: Charge timeout
+    bool pto;    // Bit18: Precharge timeout
+    bool otf;    // Bit16: Overtemperature FET
+    bool cuvc;   // Bit14: Cell undervoltage compensated
+    bool otd;    // Bit13: Overtemperature during discharge
+    bool otc;    // Bit12: Overtemperature during charge
+    bool ascdl;  // Bit11: Short-circuit during discharge latch
+    bool ascd;   // Bit10: Short-circuit during discharge
+    bool asccl;  // Bit9:  Short-circuit during charge latch
+    bool ascc;   // Bit8:  Short-circuit during charge
+    bool aoldl;  // Bit7:  Overload during discharge latch
+    bool aold;   // Bit6:  Overload during discharge
+    bool ocd2;   // Bit5:  Overcurrent during discharge 2
+    bool ocd1;   // Bit4:  Overcurrent during discharge 1
+    bool occ2;   // Bit3:  Overcurrent during charge 2
+    bool occ1;   // Bit2:  Overcurrent during charge 1
+    bool cov;    // Bit1:  Cell overvoltage
+    bool cuv;    // Bit0:  Cell undervoltage
+    uint32_t raw;
+};
+
+struct ManufacturingStatus {
+    // Confirmed directly from BQ40Z80 TRM (SLUUBT5C, page 135, sec 18.1.44).
+    // 16-bit value (not 32-bit like OperationStatus/SafetyStatus).
+    bool calEn;    // Bit15: CALIBRATION mode
+    bool ltTest;   // Bit14: LIFETIME SPEED UP mode
+    bool pdsgEn;   // Bit13: Pre-discharge FET test activated
+    bool ledEn;    // Bit9:  LED display enabled with push button
+    bool fuseEn;   // Bit8:  Fuse action enabled
+    bool bbrEn;    // Bit7:  Black box recorder enabled
+    bool pfEn;     // Bit6:  Permanent failure enabled
+    bool lfEn;     // Bit5:  Lifetime data collection enabled
+    bool fetEn;    // Bit4:  All FET action -- 1=Enabled, 0=Disabled (THE bit we need)
+    bool gaugeEn;  // Bit3:  Gas gauging enabled -- if 0, could explain
+                   //        persistent Initialized=0 independent of FET_EN
+    bool dsgEn;    // Bit2:  Discharge FET test activated
+    bool chgEn;    // Bit1:  Charge FET test activated
+    bool pchgEn;   // Bit0:  Precharge FET test activated
+    uint16_t raw;
+};
+
+struct GaugingStatus3 {
+    // Confirmed directly from BQ40Z80 TRM (SLUUBT5C, page 142, sec 18.1.57).
+    // 32 bytes = 16 little-endian int16_t words.
+    int16_t qmax1_mAh;   // QMax of Cell 1
+    int16_t qmax2_mAh;   // QMax of Cell 2
+    int16_t qmax3_mAh;   // QMax of Cell 3
+    int16_t qmax4_mAh;   // QMax of Cell 4
+    int16_t qmaxDod0_1;  // DOD0 saved for next QMax update, Cell 1 (valid only if VOK=1)
+    int16_t qmaxDod0_2;  // Cell 2
+    int16_t qmaxDod0_3;  // Cell 3
+    int16_t qmaxDod0_4;  // Cell 4
+    int16_t qmaxPassedQ_mAh; // Pass capacity since last QMax DOD value saved
+    int16_t qmaxTime;    // Time since last QMax DOD saved, units of hr/16
+    int16_t tempK;       // Thermal model temperature factor
+    int16_t tempA;       // Thermal model temperature
+    int16_t rawDod0_1;   // Raw depth of discharge, Cell 1
+    int16_t rawDod0_2;   // Cell 2
+    int16_t rawDod0_3;   // Cell 3
+    int16_t rawDod0_4;   // Cell 4
+    uint8_t rawLen;      // actual bytes returned (should be 32)
+};
+
+
+
 // =============================================================================
 // BQ40Z80 driver class
 // =============================================================================
@@ -151,17 +272,14 @@ class BQ40Z80 {
 public:
     static constexpr uint8_t  kDefaultAddress = 0x0B;
 
+    static constexpr uint16_t kDefaultUnsealKeyWord1     = 0x0414;  // VERIFY vs TRM / your pack
+    static constexpr uint16_t kDefaultUnsealKeyWord2     = 0x3672;  // VERIFY vs TRM / your pack
+    static constexpr uint16_t kDefaultFullAccessKeyWord1 = 0xFFFF;  // VERIFY vs TRM / your pack
+    static constexpr uint16_t kDefaultFullAccessKeyWord2 = 0xFFFF;  // VERIFY vs TRM / your pack
 
-    static constexpr uint16_t kDefaultUnsealKeyWord1     = 0x0414;  
-    static constexpr uint16_t kDefaultUnsealKeyWord2     = 0x3672;  
-    static constexpr uint16_t kDefaultFullAccessKeyWord1 = 0xFFFF; 
-    static constexpr uint16_t kDefaultFullAccessKeyWord2 = 0xFFFF; 
-
-    // ---- Construction / lifecycle ------------------------------------------
     BQ40Z80(gpio_num_t sclPin, gpio_num_t sdaPin, i2c_port_t port,
             uint8_t deviceAddress = kDefaultAddress, uint32_t clockHz = 100000);
     ~BQ40Z80();
-
 
     esp_err_t begin();
 
@@ -186,34 +304,42 @@ public:
     esp_err_t getDesignCapacity(uint16_t &mAh);
     esp_err_t getDesignVoltage(uint16_t &mV);
     esp_err_t getSerialNumber(uint16_t &serial);
-    esp_err_t getManufactureDate(uint16_t &packedDate);   
+    esp_err_t getManufactureDate(uint16_t &packedDate);   // (year-1980)<<9 | month<<5 | day
 
+    // ---- Layer 2: individual cell voltages (confirmed direct word reads, cells 1-4) --
     esp_err_t getCellVoltage1(uint16_t &mV);
     esp_err_t getCellVoltage2(uint16_t &mV);
     esp_err_t getCellVoltage3(uint16_t &mV);
     esp_err_t getCellVoltage4(uint16_t &mV);
 
+    // ---- Layer 2: standard SBS getters (block-based, null-terminates buf) ---
     esp_err_t getManufacturerName(char *buf, size_t bufLen);
     esp_err_t getDeviceName(char *buf, size_t bufLen);
     esp_err_t getDeviceChemistry(char *buf, size_t bufLen);
 
+    // ---- Layer 3/5: charge/discharge/precharge/pre-discharge FET control --------
     esp_err_t toggleChargeFet();
     esp_err_t toggleDischargeFet();
-    esp_err_t togglePrechargeFet();     
-    esp_err_t togglePreDischargeFet();  
-    esp_err_t toggleFuse();            
-    esp_err_t setFetControlMode(bool manualControl); 
+    esp_err_t togglePrechargeFet();     // PCHG FET, 0x001E -- precharge path only
+    esp_err_t togglePreDischargeFet();  // PDSG FET, 0x001C -- pre-discharge path only
+    esp_err_t toggleFuse();             // 0x001D -- WARNING: can be a one-way/destructive
+                                         // blown-fuse action depending on hardware fuse
+                                         // design; confirm TRM body text + your board's
+                                         // fuse circuit before ever calling this.
+    esp_err_t toggleFetEnable();
 
+    esp_err_t toggleGaugingEnable();
+
+    // ---- Layer 3: extended manufacturer block reads --------------------------
     esp_err_t readDAStatus1(DAStatus1 &out);
     esp_err_t getBatVoltage(uint16_t &mV);
-
     esp_err_t readDAStatus3(DAStatus3 &out);
     esp_err_t getCellVoltage5(uint16_t &mV);
     esp_err_t getCellVoltage6(uint16_t &mV);
     esp_err_t getDeviceType(uint16_t &type);
     esp_err_t getFirmwareVersion(uint8_t *buf, uint8_t &len, uint8_t maxLen);
 
-
+    // ---- Layer 3/5: security & lifecycle --------------------------------------
     esp_err_t unseal(uint16_t keyWord1 = kDefaultUnsealKeyWord1,
                       uint16_t keyWord2 = kDefaultUnsealKeyWord2);
     esp_err_t fullAccess(uint16_t keyWord1 = kDefaultFullAccessKeyWord1,
@@ -221,6 +347,15 @@ public:
     esp_err_t seal();
     esp_err_t reset();
 
+    esp_err_t getOperationStatus(OperationStatus &out);
+
+    esp_err_t getSafetyStatus(SafetyStatus &out);
+
+    esp_err_t getManufacturingStatus(ManufacturingStatus &out);
+
+    esp_err_t getGaugingStatus3(GaugingStatus3 &out);
+
+    // ---- Layer 4: data flash (raw) --------------------------------------------
     esp_err_t readDataFlash(uint16_t flashAddress, uint8_t *data, uint8_t len);
     esp_err_t writeDataFlash(uint16_t flashAddress, const uint8_t *data, uint8_t len);
 
@@ -235,6 +370,7 @@ public:
     esp_err_t manufacturerBlockRead(uint16_t subcommand, uint8_t *data, uint8_t &len, uint8_t maxLen);
     esp_err_t manufacturerBlockWrite(uint16_t subcommand, const uint8_t *data, uint8_t len);
 
+    // ---- Bus recovery ---------------------------------------------------------
     esp_err_t recoverBus();
 
 private:

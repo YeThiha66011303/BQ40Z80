@@ -3,9 +3,6 @@
 #include "esp_rom_sys.h"
 #include <cstring>
 
-// =============================================================================
-// Construction / lifecycle
-// =============================================================================
 BQ40Z80::BQ40Z80(gpio_num_t sclPin, gpio_num_t sdaPin, i2c_port_t port,
                   uint8_t deviceAddress, uint32_t clockHz)
     : sclPin_(sclPin), sdaPin_(sdaPin), port_(port),
@@ -156,7 +153,6 @@ esp_err_t BQ40Z80::smbusReadBlockOnce(uint8_t command, uint8_t *data, uint8_t &l
     if (countByte > 32) countByte = 32; // guard against garbage/corrupt count byte
 
     if (pecEnabled_) {
-        // PEC input: [addr+W, command, addr+R, countByte, data...]
         uint8_t pecInput[4 + 32] = {0};
         pecInput[0] = (uint8_t)((address_ << 1) | I2C_MASTER_WRITE);
         pecInput[1] = command;
@@ -204,13 +200,11 @@ esp_err_t BQ40Z80::smbusWriteBlockOnce(uint8_t command, const uint8_t *data, uin
     return err;
 }
 
-
 esp_err_t BQ40Z80::recoverBus() {
     if (initialized_) {
         i2c_driver_delete(port_);
         initialized_ = false;
     }
-
 
     gpio_config_t ioConf = {};
     ioConf.mode = GPIO_MODE_INPUT_OUTPUT_OD;
@@ -228,14 +222,13 @@ esp_err_t BQ40Z80::recoverBus() {
     for (int i = 0; i < 9; i++) {
         if (gpio_get_level(sdaPin_) == 1) {
             sdaFreed = true;
-            break; 
+            break; // slave already released the bus
         }
         gpio_set_level(sclPin_, 0);
         esp_rom_delay_us(5);
         gpio_set_level(sclPin_, 1);
         esp_rom_delay_us(5);
     }
-
 
     gpio_set_level(sdaPin_, 0);
     esp_rom_delay_us(5);
@@ -244,16 +237,12 @@ esp_err_t BQ40Z80::recoverBus() {
     gpio_set_level(sdaPin_, 1);
     esp_rom_delay_us(5);
 
-  
     esp_err_t err = begin();
     if (err != ESP_OK) return err;
 
     return sdaFreed ? ESP_OK : ESP_ERR_INVALID_STATE; // report if recovery fully succeeded
 }
 
-// =============================================================================
-// Public Layer 1 wrappers: one automatic recoverBus() + retry on
-// =============================================================================
 esp_err_t BQ40Z80::smbusReadWord(uint8_t command, uint16_t &value) {
     esp_err_t err = smbusReadWordOnce(command, value);
     if (err == ESP_ERR_TIMEOUT) {
@@ -323,11 +312,194 @@ esp_err_t BQ40Z80::manufacturerBlockWrite(uint16_t subcommand, const uint8_t *da
     return smbusWriteBlock(static_cast<uint8_t>(SbsCommand::ManufacturerBlockAccess), payload, (uint8_t)(2 + len));
 }
 
-// =============================================================================
-// Layer 2: standard SBS getters
-// =============================================================================
+esp_err_t BQ40Z80::reset() {
+    return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::DeviceReset));
+}
+
+esp_err_t BQ40Z80::getOperationStatus(OperationStatus &out) {
+    uint8_t raw[4] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::OperationStatus),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+    if (rawLen < 4) return ESP_ERR_INVALID_SIZE;
+
+    uint32_t v = (uint32_t)raw[0] | ((uint32_t)raw[1] << 8) |
+                 ((uint32_t)raw[2] << 16) | ((uint32_t)raw[3] << 24);
+    out.raw = v;
+
+    out.iataCterm = (v >> 31) & 1;
+    out.emShut    = (v >> 29) & 1;
+    out.cb        = (v >> 28) & 1;
+    out.slpCc     = (v >> 27) & 1;
+    out.slpAd     = (v >> 26) & 1;
+    out.smblCal   = (v >> 25) & 1;
+    out.init      = (v >> 24) & 1;
+    out.sleepM    = (v >> 23) & 1;
+    out.xl        = (v >> 22) & 1;
+    out.calOffset = (v >> 21) & 1;
+    out.cal       = (v >> 20) & 1;
+    out.autoCalM  = (v >> 19) & 1;
+    out.auth      = (v >> 18) & 1;
+    out.led       = (v >> 17) & 1;
+    out.sdm       = (v >> 16) & 1;
+    out.sleep     = (v >> 15) & 1;
+    out.xchg      = (v >> 14) & 1;
+    out.xdsg      = (v >> 13) & 1;
+    out.pf        = (v >> 12) & 1;
+    out.ss        = (v >> 11) & 1;
+    out.sdv       = (v >> 10) & 1;
+    out.sec       = (v >> 8) & 0x3;
+    out.btpInt    = (v >> 7) & 1;
+    out.fuse      = (v >> 5) & 1;
+    out.pdsg      = (v >> 4) & 1;
+    out.pchg      = (v >> 3) & 1;
+    out.chg       = (v >> 2) & 1;
+    out.dsg       = (v >> 1) & 1;
+    out.pres      = (v >> 0) & 1;
+
+    return ESP_OK;
+}
+
+esp_err_t BQ40Z80::toggleChargeFet() {
+    return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::ChgFetToggle));
+}
+
+esp_err_t BQ40Z80::toggleDischargeFet() {
+    return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::DsgFetToggle));
+}
+
+esp_err_t BQ40Z80::togglePrechargeFet() {
+    return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::PchgFetToggle));
+}
+
+esp_err_t BQ40Z80::togglePreDischargeFet() {
+    return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::PdsgFetToggle));
+}
+
+esp_err_t BQ40Z80::toggleFuse() {
+    return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::FuseToggle));
+}
+
+esp_err_t BQ40Z80::toggleFetEnable() {
+    return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::FetControl));
+}
+
+esp_err_t BQ40Z80::toggleGaugingEnable() {
+    return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::Gauging));
+}
+
+esp_err_t BQ40Z80::getSafetyStatus(SafetyStatus &out) {
+    uint8_t raw[4] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::SafetyStatus),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+    if (rawLen < 4) return ESP_ERR_INVALID_SIZE;
+
+    uint32_t v = (uint32_t)raw[0] | ((uint32_t)raw[1] << 8) |
+                 ((uint32_t)raw[2] << 16) | ((uint32_t)raw[3] << 24);
+    out.raw = v;
+
+    out.ocdl  = (v >> 29) & 1;
+    out.covl  = (v >> 28) & 1;
+    out.utd   = (v >> 27) & 1;
+    out.utc   = (v >> 26) & 1;
+    out.pchgc = (v >> 25) & 1;
+    out.chgv  = (v >> 24) & 1;
+    out.chgc  = (v >> 23) & 1;
+    out.oc    = (v >> 22) & 1;
+    out.cto   = (v >> 20) & 1;
+    out.pto   = (v >> 18) & 1;
+    out.otf   = (v >> 16) & 1;
+    out.cuvc  = (v >> 14) & 1;
+    out.otd   = (v >> 13) & 1;
+    out.otc   = (v >> 12) & 1;
+    out.ascdl = (v >> 11) & 1;
+    out.ascd  = (v >> 10) & 1;
+    out.asccl = (v >> 9) & 1;
+    out.ascc  = (v >> 8) & 1;
+    out.aoldl = (v >> 7) & 1;
+    out.aold  = (v >> 6) & 1;
+    out.ocd2  = (v >> 5) & 1;
+    out.ocd1  = (v >> 4) & 1;
+    out.occ2  = (v >> 3) & 1;
+    out.occ1  = (v >> 2) & 1;
+    out.cov   = (v >> 1) & 1;
+    out.cuv   = (v >> 0) & 1;
+
+    return ESP_OK;
+}
+
+esp_err_t BQ40Z80::getManufacturingStatus(ManufacturingStatus &out) {
+    uint8_t raw[2] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::ManufacturingStatus),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+    if (rawLen < 2) return ESP_ERR_INVALID_SIZE;
+
+    uint16_t v = (uint16_t)raw[0] | ((uint16_t)raw[1] << 8);
+    out.raw = v;
+
+    out.calEn   = (v >> 15) & 1;
+    out.ltTest  = (v >> 14) & 1;
+    out.pdsgEn  = (v >> 13) & 1;
+    out.ledEn   = (v >> 9) & 1;
+    out.fuseEn  = (v >> 8) & 1;
+    out.bbrEn   = (v >> 7) & 1;
+    out.pfEn    = (v >> 6) & 1;
+    out.lfEn    = (v >> 5) & 1;
+    out.fetEn   = (v >> 4) & 1;
+    out.gaugeEn = (v >> 3) & 1;
+    out.dsgEn   = (v >> 2) & 1;
+    out.chgEn   = (v >> 1) & 1;
+    out.pchgEn  = (v >> 0) & 1;
+
+    return ESP_OK;
+}
+
+esp_err_t BQ40Z80::getGaugingStatus3(GaugingStatus3 &out) {
+    uint8_t raw[32] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::GaugingStatus3),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+
+    out.rawLen = rawLen;
+    if (rawLen < 32) return ESP_ERR_INVALID_SIZE;
+
+    int16_t *words = reinterpret_cast<int16_t *>(raw);
+    out.qmax1_mAh       = words[0];
+    out.qmax2_mAh       = words[1];
+    out.qmax3_mAh       = words[2];
+    out.qmax4_mAh       = words[3];
+    out.qmaxDod0_1      = words[4];
+    out.qmaxDod0_2      = words[5];
+    out.qmaxDod0_3      = words[6];
+    out.qmaxDod0_4      = words[7];
+    out.qmaxPassedQ_mAh = words[8];
+    out.qmaxTime        = words[9];
+    out.tempK           = words[10];
+    out.tempA           = words[11];
+    out.rawDod0_1       = words[12];
+    out.rawDod0_2       = words[13];
+    out.rawDod0_3       = words[14];
+    out.rawDod0_4       = words[15];
+
+    return ESP_OK;
+}
+
+esp_err_t BQ40Z80::getTemperature(uint16_t &deciKelvin) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::Temperature), deciKelvin);
+}
+
 esp_err_t BQ40Z80::getVoltage(uint16_t &mV) {
     return smbusReadWord(static_cast<uint8_t>(SbsCommand::Voltage), mV);
+}
+
+esp_err_t BQ40Z80::getBatteryStatus(uint16_t &flags) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::BatteryStatus), flags);
 }
 
 esp_err_t BQ40Z80::getCurrent(int16_t &mA) {
@@ -337,6 +509,18 @@ esp_err_t BQ40Z80::getCurrent(int16_t &mA) {
         mA = (int16_t)raw; // Current() is signed: negative = discharging
     }
     return err;
+}
+
+esp_err_t BQ40Z80::getRemainingCapacity(uint16_t &mAh) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::RemainingCapacity), mAh);
+}
+
+esp_err_t BQ40Z80::getFullChargeCapacity(uint16_t &mAh) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::FullChargeCapacity), mAh);
+}
+
+esp_err_t BQ40Z80::getDesignCapacity(uint16_t &mAh) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::DesignCapacity), mAh);
 }
 
 esp_err_t BQ40Z80::getCellVoltage1(uint16_t &mV) {
@@ -360,7 +544,7 @@ esp_err_t BQ40Z80::readDAStatus1(DAStatus1 &out) {
     if (err != ESP_OK) return err;
 
     out.rawLen = rawLen;
-    if (rawLen < 32) return ESP_ERR_INVALID_SIZE; 
+    if (rawLen < 32) return ESP_ERR_INVALID_SIZE; // shouldn't happen, but guard anyway
     memcpy(out.raw, raw, 32);
 
     int16_t *words = reinterpret_cast<int16_t *>(raw);
