@@ -81,8 +81,6 @@ enum class MfaSubcommand : uint16_t {
     DAStatus3       = 0x007B,  // Confirmed vs TI E2E forum (was WRONG as 0x0073 --
                                 // 0x0073 is actually GaugingStatus1 per TRM ToC sec 18.1.55)
 
-    // --- Confirmed against TI BQ40Z80 TRM SLUUBT5C table of contents ---
-    // NOTE: these are RAM-only overrides -- state is lost on reset/seal.
     PdsgFetToggle   = 0x001C,  // Confirmed vs TRM SLUUBT5C sec 18.1.13 (pre-discharge)
     FuseToggle      = 0x001D,  // Confirmed vs TRM SLUUBT5C sec 18.1.14
     PchgFetToggle   = 0x001E,  // Confirmed vs TRM SLUUBT5C sec 18.1.15 (precharge)
@@ -105,7 +103,10 @@ enum class MfaSubcommand : uint16_t {
     SafetyStatus     = 0x0051, // Confirmed vs TRM SLUUBT5C sec 18.1.38, bits confirmed
     ManufacturingStatus = 0x0057, // Confirmed vs TRM SLUUBT5C sec 18.1.44, bits confirmed
     GaugingStatus3   = 0x0075, // Confirmed vs TRM SLUUBT5C sec 18.1.57, layout confirmed
-
+    GaugingStatus    = 0x0056, // Confirmed vs TRM SLUUBT5C sec 18.1.43, bits confirmed --
+                                // has the actual CHG/DSG/REST state bits
+    GaugingStatus4   = 0x007C, // Confirmed vs TRM SLUUBT5C sec 18.1.64, layout confirmed --
+                                // QMax/QMaxDOD0 for cells 5-6
 };
 
 // -----------------------------------------------------------------------------
@@ -147,7 +148,6 @@ struct DAStatus3 {
 };
 
 struct OperationStatus {
-    // Confirmed directly from BQ40Z80 TRM (SLUUBT5C, page 129, sec 18.1.41).
     bool iataCterm;   // Bit31: IATA charge control
     bool emShut;      // Bit29: Emergency FET shutdown
     bool cb;          // Bit28: Cell balancing status
@@ -191,7 +191,6 @@ inline const char *operationStatusSecName(uint8_t sec) {
 }
 
 struct SafetyStatus {
-    // Confirmed directly from BQ40Z80 TRM (SLUUBT5C, page 123, sec 18.1.38).
     bool ocdl;   // Bit29: Overcurrent in discharge (latch)
     bool covl;   // Bit28: Cell overvoltage latch
     bool utd;    // Bit27: Undertemperature during discharge
@@ -222,8 +221,6 @@ struct SafetyStatus {
 };
 
 struct ManufacturingStatus {
-    // Confirmed directly from BQ40Z80 TRM (SLUUBT5C, page 135, sec 18.1.44).
-    // 16-bit value (not 32-bit like OperationStatus/SafetyStatus).
     bool calEn;    // Bit15: CALIBRATION mode
     bool ltTest;   // Bit14: LIFETIME SPEED UP mode
     bool pdsgEn;   // Bit13: Pre-discharge FET test activated
@@ -242,8 +239,6 @@ struct ManufacturingStatus {
 };
 
 struct GaugingStatus3 {
-    // Confirmed directly from BQ40Z80 TRM (SLUUBT5C, page 142, sec 18.1.57).
-    // 32 bytes = 16 little-endian int16_t words.
     int16_t qmax1_mAh;   // QMax of Cell 1
     int16_t qmax2_mAh;   // QMax of Cell 2
     int16_t qmax3_mAh;   // QMax of Cell 3
@@ -263,6 +258,50 @@ struct GaugingStatus3 {
     uint8_t rawLen;      // actual bytes returned (should be 32)
 };
 
+struct GaugingStatus {
+    bool ocvfr;    // Bit20: OCV in flat region (during RELAX)
+    bool ldmd;     // Bit19: LOAD mode (1=Constant Power, 0=Constant Current)
+    bool rx;       // Bit18: Resistance update (toggles after every update)
+    bool qmaxTog;  // Bit17: QMax update (toggles after every QMax update)
+    bool vdq;      // Bit16: Discharge qualified for learning
+    bool nsfm;     // Bit15: Negative scale factor mode
+    bool slpQmax;  // Bit13: OCV update in SLEEP mode
+    bool qen;      // Bit12: Impedance Track gauging enabled
+    bool vok;      // Bit11: Voltages OK for QMax update (DOD saved)
+    bool rDis;     // Bit10: Resistance updates disabled
+    bool rest;     // Bit8:  Rest -- 1 = OCV reading taken (in/was in RELAX)
+    bool cf;       // Bit7:  Condition flag (MaxError() > limit)
+    bool dsg;      // Bit6:  1 = charging NOT detected, 0 = charging detected
+                    //        (the key CHARGE vs not-CHARGE indicator)
+    bool edv;      // Bit5:  End-of-discharge termination voltage reached
+    bool balEn;    // Bit4:  Cell balancing possible
+    bool tc;       // Bit3:  Terminate charge detected
+    bool td;       // Bit2:  Terminate discharge detected
+    bool fc;       // Bit1:  Fully charged
+    bool fd;       // Bit0:  Fully discharged
+    uint32_t raw;
+};
+
+struct GaugingStatus4 {
+    int16_t raScale5;      // Cell 5
+    int16_t compRes5;
+    int16_t dod0_5;
+    int16_t dodEoc5;
+    int16_t qmax5_mAh;
+    int16_t qmaxDod0_5;    // <-- QMax DOD0 for Cell 5 (what was asked for)
+    int16_t rawDod0_5;
+    uint8_t cellGrid5;
+    int16_t raScale6;      // Cell 6
+    int16_t compRes6;
+    int16_t dod0_6;
+    int16_t dodEoc6;
+    int16_t qmax6_mAh;
+    int16_t qmaxDod0_6;    // <-- QMax DOD0 for Cell 6 (what was asked for)
+    int16_t rawDod0_6;
+    uint8_t cellGrid6;
+    uint8_t rawLen;
+};
+
 
 
 // =============================================================================
@@ -272,7 +311,7 @@ class BQ40Z80 {
 public:
     static constexpr uint8_t  kDefaultAddress = 0x0B;
 
-    static constexpr uint16_t kDefaultUnsealKeyWord1     = 0x0414;  // VERIFY vs TRM / your pack
+   static constexpr uint16_t kDefaultUnsealKeyWord1     = 0x0414;  // VERIFY vs TRM / your pack
     static constexpr uint16_t kDefaultUnsealKeyWord2     = 0x3672;  // VERIFY vs TRM / your pack
     static constexpr uint16_t kDefaultFullAccessKeyWord1 = 0xFFFF;  // VERIFY vs TRM / your pack
     static constexpr uint16_t kDefaultFullAccessKeyWord2 = 0xFFFF;  // VERIFY vs TRM / your pack
@@ -286,6 +325,7 @@ public:
     void setPecEnabled(bool enabled) { pecEnabled_ = enabled; }
     bool getPecEnabled() const { return pecEnabled_; }
 
+    // ---- Layer 2: standard SBS getters (word-based) -------------------------
     esp_err_t getVoltage(uint16_t &mV);
     esp_err_t getCurrent(int16_t &mA);
     esp_err_t getAverageCurrent(int16_t &mA);
@@ -320,12 +360,9 @@ public:
     // ---- Layer 3/5: charge/discharge/precharge/pre-discharge FET control --------
     esp_err_t toggleChargeFet();
     esp_err_t toggleDischargeFet();
-    esp_err_t togglePrechargeFet();     // PCHG FET, 0x001E -- precharge path only
-    esp_err_t togglePreDischargeFet();  // PDSG FET, 0x001C -- pre-discharge path only
-    esp_err_t toggleFuse();             // 0x001D -- WARNING: can be a one-way/destructive
-                                         // blown-fuse action depending on hardware fuse
-                                         // design; confirm TRM body text + your board's
-                                         // fuse circuit before ever calling this.
+    esp_err_t togglePrechargeFet();     
+    esp_err_t togglePreDischargeFet();  
+    esp_err_t toggleFuse();             
     esp_err_t toggleFetEnable();
 
     esp_err_t toggleGaugingEnable();
@@ -354,6 +391,9 @@ public:
     esp_err_t getManufacturingStatus(ManufacturingStatus &out);
 
     esp_err_t getGaugingStatus3(GaugingStatus3 &out);
+
+    esp_err_t getGaugingStatus(GaugingStatus &out);
+    esp_err_t getGaugingStatus4(GaugingStatus4 &out);
 
     // ---- Layer 4: data flash (raw) --------------------------------------------
     esp_err_t readDataFlash(uint16_t flashAddress, uint8_t *data, uint8_t len);

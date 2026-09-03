@@ -3,6 +3,9 @@
 #include "esp_rom_sys.h"
 #include <cstring>
 
+// =============================================================================
+// Construction / lifecycle
+// =============================================================================
 BQ40Z80::BQ40Z80(gpio_num_t sclPin, gpio_num_t sdaPin, i2c_port_t port,
                   uint8_t deviceAddress, uint32_t clockHz)
     : sclPin_(sclPin), sdaPin_(sdaPin), port_(port),
@@ -121,6 +124,8 @@ esp_err_t BQ40Z80::smbusWriteWordOnce(uint8_t command, uint16_t value) {
 
 // =============================================================================
 // Layer 1: block read/write, e.g. ManufacturerName(), ManufacturerData(), etc.
+// SMBus block protocol: command byte, then a device-reported byte-count byte,
+// then that many data bytes, then PEC (if enabled).
 // =============================================================================
 esp_err_t BQ40Z80::smbusReadBlockOnce(uint8_t command, uint8_t *data, uint8_t &len, uint8_t maxLen) {
     if (!initialized_) return ESP_ERR_INVALID_STATE;
@@ -153,6 +158,7 @@ esp_err_t BQ40Z80::smbusReadBlockOnce(uint8_t command, uint8_t *data, uint8_t &l
     if (countByte > 32) countByte = 32; // guard against garbage/corrupt count byte
 
     if (pecEnabled_) {
+        // PEC input: [addr+W, command, addr+R, countByte, data...]
         uint8_t pecInput[4 + 32] = {0};
         pecInput[0] = (uint8_t)((address_ << 1) | I2C_MASTER_WRITE);
         pecInput[1] = command;
@@ -200,12 +206,21 @@ esp_err_t BQ40Z80::smbusWriteBlockOnce(uint8_t command, const uint8_t *data, uin
     return err;
 }
 
+// =============================================================================
+// Bus recovery: manually bit-bang up to 9 SCL pulses (releasing the I2C
+// peripheral's control of the pins temporarily) to force a wedged slave to
+// release SDA, then issue a manual STOP condition, then reinitialize the I2C
+// driver. Standard I2C/SMBus bus-recovery pattern -- not BQ40Z80-specific.
+// =============================================================================
 esp_err_t BQ40Z80::recoverBus() {
     if (initialized_) {
         i2c_driver_delete(port_);
         initialized_ = false;
     }
 
+    // Configure both lines as open-drain GPIO so we can bit-bang them like
+    // the bus naturally works: only ever drive low, or release (let the
+    // external pull-up bring the line high).
     gpio_config_t ioConf = {};
     ioConf.mode = GPIO_MODE_INPUT_OUTPUT_OD;
     ioConf.pull_up_en = GPIO_PULLUP_DISABLE; // external pull-ups already present
@@ -230,6 +245,7 @@ esp_err_t BQ40Z80::recoverBus() {
         esp_rom_delay_us(5);
     }
 
+    // Manual STOP condition: SDA low->high while SCL is high.
     gpio_set_level(sdaPin_, 0);
     esp_rom_delay_us(5);
     gpio_set_level(sclPin_, 1);
@@ -237,12 +253,17 @@ esp_err_t BQ40Z80::recoverBus() {
     gpio_set_level(sdaPin_, 1);
     esp_rom_delay_us(5);
 
+    // Hand the pins back to the I2C peripheral.
     esp_err_t err = begin();
     if (err != ESP_OK) return err;
 
     return sdaFreed ? ESP_OK : ESP_ERR_INVALID_STATE; // report if recovery fully succeeded
 }
 
+// =============================================================================
+// Public Layer 1 wrappers: one automatic recoverBus() + retry on
+// ESP_ERR_TIMEOUT, so a wedged bus self-heals instead of failing forever.
+// =============================================================================
 esp_err_t BQ40Z80::smbusReadWord(uint8_t command, uint16_t &value) {
     esp_err_t err = smbusReadWordOnce(command, value);
     if (err == ESP_ERR_TIMEOUT) {
@@ -313,6 +334,8 @@ esp_err_t BQ40Z80::manufacturerBlockWrite(uint16_t subcommand, const uint8_t *da
 }
 
 esp_err_t BQ40Z80::reset() {
+    // Confirmed vs TRM SLUUBT5C sec 18.1.36: writing 0x0041 to
+    // ManufacturerAccess() resets the device.
     return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::DeviceReset));
 }
 
@@ -382,10 +405,14 @@ esp_err_t BQ40Z80::toggleFuse() {
 }
 
 esp_err_t BQ40Z80::toggleFetEnable() {
+    // Confirmed vs TRM SLUUBT5C sec 18.1.19: pure toggle of
+    // ManufacturingStatus()[FET_EN]. See header comment for full semantics.
     return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::FetControl));
 }
 
 esp_err_t BQ40Z80::toggleGaugingEnable() {
+    // Confirmed vs TRM SLUUBT5C sec 18.1.18: pure toggle of
+    // ManufacturingStatus()[GAUGE_EN].
     return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::Gauging));
 }
 
@@ -490,6 +517,77 @@ esp_err_t BQ40Z80::getGaugingStatus3(GaugingStatus3 &out) {
     return ESP_OK;
 }
 
+esp_err_t BQ40Z80::getGaugingStatus(GaugingStatus &out) {
+    uint8_t raw[4] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::GaugingStatus),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+    if (rawLen < 3) return ESP_ERR_INVALID_SIZE; // need at least 3 bytes (24 bits)
+
+    uint32_t v = (uint32_t)raw[0] | ((uint32_t)raw[1] << 8) | ((uint32_t)raw[2] << 16);
+    if (rawLen >= 4) v |= ((uint32_t)raw[3] << 24);
+    out.raw = v;
+
+    out.ocvfr   = (v >> 20) & 1;
+    out.ldmd    = (v >> 19) & 1;
+    out.rx      = (v >> 18) & 1;
+    out.qmaxTog = (v >> 17) & 1;
+    out.vdq     = (v >> 16) & 1;
+    out.nsfm    = (v >> 15) & 1;
+    out.slpQmax = (v >> 13) & 1;
+    out.qen     = (v >> 12) & 1;
+    out.vok     = (v >> 11) & 1;
+    out.rDis    = (v >> 10) & 1;
+    out.rest    = (v >> 8) & 1;
+    out.cf      = (v >> 7) & 1;
+    out.dsg     = (v >> 6) & 1;
+    out.edv     = (v >> 5) & 1;
+    out.balEn   = (v >> 4) & 1;
+    out.tc      = (v >> 3) & 1;
+    out.td      = (v >> 2) & 1;
+    out.fc      = (v >> 1) & 1;
+    out.fd      = (v >> 0) & 1;
+
+    return ESP_OK;
+}
+
+esp_err_t BQ40Z80::getGaugingStatus4(GaugingStatus4 &out) {
+    uint8_t raw[30] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::GaugingStatus4),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+
+    out.rawLen = rawLen;
+    if (rawLen < 30) return ESP_ERR_INVALID_SIZE;
+
+    int16_t *words = reinterpret_cast<int16_t *>(raw); // first 14 bytes = 7 words
+    out.raScale5   = words[0];
+    out.compRes5   = words[1];
+    out.dod0_5     = words[2];
+    out.dodEoc5    = words[3];
+    out.qmax5_mAh  = words[4];
+    out.qmaxDod0_5 = words[5];
+    out.rawDod0_5  = words[6];
+    out.cellGrid5  = raw[14]; // byte 14, single byte
+
+    int16_t *words2 = reinterpret_cast<int16_t *>(raw + 15); // next 14 bytes
+    out.raScale6   = words2[0];
+    out.compRes6   = words2[1];
+    out.dod0_6     = words2[2];
+    out.dodEoc6    = words2[3];
+    out.qmax6_mAh  = words2[4];
+    out.qmaxDod0_6 = words2[5];
+    out.rawDod0_6  = words2[6];
+    out.cellGrid6  = raw[29]; // byte 29, single byte
+
+    return ESP_OK;
+}
+
+// =============================================================================
+// Layer 2: standard SBS getters
+// =============================================================================
 esp_err_t BQ40Z80::getTemperature(uint16_t &deciKelvin) {
     return smbusReadWord(static_cast<uint8_t>(SbsCommand::Temperature), deciKelvin);
 }
@@ -511,6 +609,7 @@ esp_err_t BQ40Z80::getCurrent(int16_t &mA) {
     return err;
 }
 
+// ---- Individual cell voltages (confirmed direct word reads, cells 1-4) --------
 esp_err_t BQ40Z80::getRemainingCapacity(uint16_t &mAh) {
     return smbusReadWord(static_cast<uint8_t>(SbsCommand::RemainingCapacity), mAh);
 }
@@ -536,6 +635,7 @@ esp_err_t BQ40Z80::getCellVoltage4(uint16_t &mV) {
     return smbusReadWord(static_cast<uint8_t>(SbsCommand::CellVoltage4), mV);
 }
 
+// ---- DAStatus1 (0x0071) -- confirmed 16-word layout, see struct comment ------
 esp_err_t BQ40Z80::readDAStatus1(DAStatus1 &out) {
     uint8_t raw[32] = {0};
     uint8_t rawLen = 0;
@@ -547,6 +647,7 @@ esp_err_t BQ40Z80::readDAStatus1(DAStatus1 &out) {
     if (rawLen < 32) return ESP_ERR_INVALID_SIZE; // shouldn't happen, but guard anyway
     memcpy(out.raw, raw, 32);
 
+    // Little-endian int16_t words, in the confirmed field order.
     int16_t *words = reinterpret_cast<int16_t *>(raw);
     out.cellVoltage1_mV = words[0];
     out.cellVoltage2_mV = words[1];
@@ -577,6 +678,8 @@ esp_err_t BQ40Z80::getBatVoltage(uint16_t &mV) {
     return err;
 }
 
+// ---- DAStatus3 (0x007B) -- confirmed 9-word interleaved layout, see struct ---
+// ---- comment above (TRM SLUUBT5C page 143, sec 18.1.63) ----------------------
 esp_err_t BQ40Z80::readDAStatus3(DAStatus3 &out) {
     uint8_t raw[18] = {0};
     uint8_t rawLen = 0;

@@ -3,6 +3,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <cstdio>
+#include <cstdlib>
 
 static const char *TAG = "app_main";
 
@@ -10,6 +11,8 @@ static const char *TAG = "app_main";
 #define SCL_PIN GPIO_NUM_12
 
 #define RUN_FET_TOGGLE_TEST 0
+
+#define RUN_GAUGE_CYCLE_TEST 0
 
 extern "C" void app_main(void)
 {
@@ -64,7 +67,6 @@ extern "C" void app_main(void)
             ESP_LOGI(TAG, "FET_EN already 1 -- not toggling.");
         }
 
-
         ManufacturingStatus mfgAfter = {};
         esp_err_t mfgAfterErr = gauge.getManufacturingStatus(mfgAfter);
         if (mfgAfterErr == ESP_OK) {
@@ -74,10 +76,9 @@ extern "C" void app_main(void)
             ESP_LOGE(TAG, "getManufacturingStatus() (verify) failed: %s", esp_err_to_name(mfgAfterErr));
         }
     }
-    vTaskDelay(pdMS_TO_TICKS(500)); 
+    vTaskDelay(pdMS_TO_TICKS(500)); // give the gauge time to re-evaluate and act on it
 
 #if RUN_FET_TOGGLE_TEST
-
     ESP_LOGI(TAG, "=== FET toggle test starting ===");
 
     ESP_LOGI(TAG, "Step 1: toggling FET_EN off (manual control)...");
@@ -128,28 +129,154 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "=== FET toggle test complete ===");
 #endif
 
-    while (1) {
+#if RUN_GAUGE_CYCLE_TEST
+    ESP_LOGI(TAG, "=== GAUGE_EN cycle test starting ===");
 
+    GaugingStatus3 gs3Before = {};
+    if (gauge.getGaugingStatus3(gs3Before) == ESP_OK) {
+        ESP_LOGI(TAG, "QMax Time BEFORE: %d (hr/16), QMax PassedQ: %d mAh",
+                 gs3Before.qmaxTime, gs3Before.qmaxPassedQ_mAh);
+    }
+
+    ManufacturingStatus mfgStart = {};
+    if (gauge.getManufacturingStatus(mfgStart) == ESP_OK && mfgStart.gaugeEn) {
+        ESP_LOGI(TAG, "GAUGE_EN currently 1, cycling off then on...");
+
+        gauge.toggleGaugingEnable(); // -> 0
+        vTaskDelay(pdMS_TO_TICKS(500));
+        ManufacturingStatus mfgMid = {};
+        if (gauge.getManufacturingStatus(mfgMid) == ESP_OK) {
+            ESP_LOGI(TAG, "GAUGE_EN after first toggle: %d (expect 0)", mfgMid.gaugeEn);
+        }
+
+        gauge.toggleGaugingEnable(); // -> 1
+        vTaskDelay(pdMS_TO_TICKS(500));
+        ManufacturingStatus mfgEnd = {};
+        if (gauge.getManufacturingStatus(mfgEnd) == ESP_OK) {
+            ESP_LOGI(TAG, "GAUGE_EN after second toggle: %d (expect 1, back to normal)", mfgEnd.gaugeEn);
+        }
+    } else {
+        ESP_LOGW(TAG, "GAUGE_EN was not 1 before starting -- skipping cycle to avoid leaving it wrong.");
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(2000)); // give the gauge a moment to process the fresh trigger
+
+    GaugingStatus3 gs3After = {};
+    if (gauge.getGaugingStatus3(gs3After) == ESP_OK) {
+        ESP_LOGI(TAG, "QMax Time AFTER: %d (hr/16), QMax PassedQ: %d mAh",
+                 gs3After.qmaxTime, gs3After.qmaxPassedQ_mAh);
+    }
+    ESP_LOGI(TAG, "=== GAUGE_EN cycle test complete ===");
+#endif
+
+    while (1) {
         uint16_t packMv = 0;
         int16_t  packMa = 0;
         esp_err_t vErr = gauge.getVoltage(packMv);
         esp_err_t iErr = gauge.getCurrent(packMa);
-
-        uint16_t cellMv[4] = {0};
-        esp_err_t cellErr[4];
-        cellErr[0] = gauge.getCellVoltage1(cellMv[0]);
-        cellErr[1] = gauge.getCellVoltage2(cellMv[1]);
-        cellErr[2] = gauge.getCellVoltage3(cellMv[2]);
-        cellErr[3] = gauge.getCellVoltage4(cellMv[3]);
-
-        uint16_t batMv = 0;
-        esp_err_t batErr = gauge.getBatVoltage(batMv);
 
         DAStatus1 da1 = {};
         esp_err_t da1Err = gauge.readDAStatus1(da1);
 
         DAStatus3 da3 = {};
         esp_err_t da3Err = gauge.readDAStatus3(da3);
+
+        #define UV_CUTOFF_MV 2500
+        #define OV_CUTOFF_MV 3650
+        #define OV_RECOVER_MV 3600
+        static bool manualModeActive = false;
+        static bool dsgLatchedOff = false;
+
+        if (da1Err == ESP_OK && da3Err == ESP_OK) {
+            int16_t minCellMv = da1.cellVoltage1_mV;
+            if (da1.cellVoltage2_mV < minCellMv) minCellMv = da1.cellVoltage2_mV;
+            if (da1.cellVoltage3_mV < minCellMv) minCellMv = da1.cellVoltage3_mV;
+            if (da1.cellVoltage4_mV < minCellMv) minCellMv = da1.cellVoltage4_mV;
+            if (da3.cellVoltage5_mV < minCellMv) minCellMv = da3.cellVoltage5_mV;
+            if (da3.cellVoltage6_mV < minCellMv) minCellMv = da3.cellVoltage6_mV;
+
+            int16_t maxCellMv = da1.cellVoltage1_mV;
+            if (da1.cellVoltage2_mV > maxCellMv) maxCellMv = da1.cellVoltage2_mV;
+            if (da1.cellVoltage3_mV > maxCellMv) maxCellMv = da1.cellVoltage3_mV;
+            if (da1.cellVoltage4_mV > maxCellMv) maxCellMv = da1.cellVoltage4_mV;
+            if (da3.cellVoltage5_mV > maxCellMv) maxCellMv = da3.cellVoltage5_mV;
+            if (da3.cellVoltage6_mV > maxCellMv) maxCellMv = da3.cellVoltage6_mV;
+
+            bool needUvCutoff = (minCellMv <= UV_CUTOFF_MV);
+            bool needOvCutoff = (maxCellMv >= OV_CUTOFF_MV);
+            bool okToRecoverOv = (maxCellMv <= OV_RECOVER_MV);
+
+            if (!manualModeActive && (needUvCutoff || needOvCutoff)) {
+                ESP_LOGW(TAG, "!!! CUTOFF TRIGGERED: min=%d mV max=%d mV -- entering manual FET mode !!!",
+                         minCellMv, maxCellMv);
+                ManufacturingStatus mfg = {};
+                if (gauge.getManufacturingStatus(mfg) == ESP_OK && mfg.fetEn) {
+                    gauge.toggleFetEnable();
+                    vTaskDelay(pdMS_TO_TICKS(300));
+                }
+                manualModeActive = true;
+            }
+
+            if (manualModeActive) {
+                ManufacturingStatus mfgNow = {};
+                OperationStatus op = {}; // still read for comparison/telemetry
+                if (gauge.getManufacturingStatus(mfgNow) == ESP_OK && gauge.getOperationStatus(op) == ESP_OK) {
+                    ESP_LOGI(TAG, "[Check] ManufacturingStatus chgEn=%d dsgEn=%d  vs  OperationStatus CHG=%d DSG=%d",
+                             mfgNow.chgEn, mfgNow.dsgEn, op.chg, op.dsg);
+
+                    // CHG FET: open on OV trip, close again on OV recovery.
+                    if (needOvCutoff && mfgNow.chgEn) {
+                        ESP_LOGW(TAG, "Opening CHG FET (overvoltage, %d mV)...", maxCellMv);
+                        esp_err_t toggleErr = gauge.toggleChargeFet();
+                        ESP_LOGW(TAG, "toggleChargeFet() returned: %s", esp_err_to_name(toggleErr));
+                        vTaskDelay(pdMS_TO_TICKS(300));
+                        ManufacturingStatus mfgVerify = {};
+                        if (gauge.getManufacturingStatus(mfgVerify) == ESP_OK) {
+                            ESP_LOGW(TAG, "chgEn after toggle attempt: %d (expect 0)", mfgVerify.chgEn);
+                            if (mfgVerify.chgEn) {
+                                ESP_LOGE(TAG, "chgEn DID NOT CLEAR -- retrying once immediately...");
+                                esp_err_t retryErr = gauge.toggleChargeFet();
+                                ESP_LOGE(TAG, "Retry toggleChargeFet() returned: %s", esp_err_to_name(retryErr));
+                                vTaskDelay(pdMS_TO_TICKS(300));
+                                ManufacturingStatus mfgVerify2 = {};
+                                if (gauge.getManufacturingStatus(mfgVerify2) == ESP_OK) {
+                                    ESP_LOGE(TAG, "chgEn after retry: %d (expect 0)", mfgVerify2.chgEn);
+                                }
+                            }
+                        }
+                    } else if (okToRecoverOv && !mfgNow.chgEn && !dsgLatchedOff) {
+                        ESP_LOGI(TAG, "Cell voltage recovered to %d mV (<= %d) -- closing CHG FET",
+                                 maxCellMv, OV_RECOVER_MV);
+                        esp_err_t toggleErr = gauge.toggleChargeFet();
+                        ESP_LOGI(TAG, "toggleChargeFet() returned: %s", esp_err_to_name(toggleErr));
+                        vTaskDelay(pdMS_TO_TICKS(300));
+                    }
+
+                    // DSG FET: open on UV trip, latched off -- no auto-recovery.
+                    if (needUvCutoff && mfgNow.dsgEn && !dsgLatchedOff) {
+                        ESP_LOGW(TAG, "Opening DSG FET (undervoltage, %d mV) -- LATCHED, "
+                                 "requires restart to clear", minCellMv);
+                        esp_err_t toggleErr = gauge.toggleDischargeFet();
+                        ESP_LOGW(TAG, "toggleDischargeFet() returned: %s", esp_err_to_name(toggleErr));
+                        vTaskDelay(pdMS_TO_TICKS(300));
+                        dsgLatchedOff = true;
+                    }
+                    else if (!mfgNow.dsgEn && !dsgLatchedOff && !needUvCutoff) {
+                        ESP_LOGI(TAG, "DSG FET was open but not from our own UV latch "
+                                 "(min=%d mV, safe) -- closing it", minCellMv);
+                        esp_err_t toggleErr = gauge.toggleDischargeFet();
+                        ESP_LOGI(TAG, "toggleDischargeFet() returned: %s", esp_err_to_name(toggleErr));
+                        vTaskDelay(pdMS_TO_TICKS(300));
+                    }
+                }
+
+                OperationStatus opFinal = {};
+                if (gauge.getOperationStatus(opFinal) == ESP_OK) {
+                    ESP_LOGI(TAG, "[Manual mode] CHG FET=%d, DSG FET=%d, DSG latched=%d",
+                             opFinal.chg, opFinal.dsg, dsgLatchedOff);
+                }
+            }
+        }
 
         uint16_t tempDeciK = 0;
         esp_err_t tempErr = gauge.getTemperature(tempDeciK);
@@ -188,21 +315,17 @@ extern "C" void app_main(void)
             ESP_LOGI(TAG, "[DAStatus3] Cell5: %d mV, Cell6: %d mV, Cell7: %d mV",
                      da3.cellVoltage5_mV, da3.cellVoltage6_mV, da3.cellVoltage7_mV);
         }
-        for (int i = 0; i < 4; i++) {
-            if (cellErr[i] == ESP_OK) {
-                ESP_LOGI(TAG, "[Standalone] Cell %d Voltage: %u mV", i + 1, cellMv[i]);
-            } else {
-                ESP_LOGE(TAG, "getCellVoltage%d() failed: %s", i + 1, esp_err_to_name(cellErr[i]));
-            }
-        }
-
-        if (batErr == ESP_OK) {
-            ESP_LOGI(TAG, "Total Battery Voltage (DAStatus1 BAT): %u mV", batMv);
+        if (vErr == ESP_OK) {
+            ESP_LOGI(TAG, "Pack Voltage (Voltage()): %u mV", packMv);
         } else {
-            ESP_LOGE(TAG, "getBatVoltage() failed: %s", esp_err_to_name(batErr));
+            ESP_LOGE(TAG, "getVoltage() failed: %s", esp_err_to_name(vErr));
+        }
+        if (iErr == ESP_OK) {
+            ESP_LOGI(TAG, "Pack Current: %d mA", packMa);
+        } else {
+            ESP_LOGE(TAG, "getCurrent() failed: %s", esp_err_to_name(iErr));
         }
         if (da1Err == ESP_OK) {
-            ESP_LOGI(TAG, "[DAStatus1] BAT: %d mV, PACK: %d mV", da1.batVoltage_mV, da1.packVoltage_mV);
             ESP_LOGI(TAG, "[DAStatus1] CellCurrent1: %d mA, CellCurrent2: %d mA, CellCurrent3: %d mA, CellCurrent4: %d mA",
                      da1.cellCurrent1_mA, da1.cellCurrent2_mA, da1.cellCurrent3_mA, da1.cellCurrent4_mA);
             ESP_LOGI(TAG, "[DAStatus1] CellPower1: %d cW, CellPower2: %d cW, CellPower3: %d cW, CellPower4: %d cW",
@@ -215,16 +338,6 @@ extern "C" void app_main(void)
                      da3.cellCurrent5_mA, da3.cellCurrent6_mA, da3.cellCurrent7_mA);
             ESP_LOGI(TAG, "[DAStatus3] CellPower5: %d cW, CellPower6: %d cW, CellPower7: %d cW",
                      da3.cellPower5, da3.cellPower6, da3.cellPower7);
-        }
-        if (vErr == ESP_OK) {
-            ESP_LOGI(TAG, "Pack Voltage (Voltage()): %u mV", packMv);
-        } else {
-            ESP_LOGE(TAG, "getVoltage() failed: %s", esp_err_to_name(vErr));
-        }
-        if (iErr == ESP_OK) {
-            ESP_LOGI(TAG, "Pack Current: %d mA", packMa);
-        } else {
-            ESP_LOGE(TAG, "getCurrent() failed: %s", esp_err_to_name(iErr));
         }
 
         uint16_t battStatus = 0;
@@ -322,6 +435,35 @@ extern "C" void app_main(void)
                      gs3.qmaxPassedQ_mAh, gs3.qmaxTime);
         } else {
             ESP_LOGE(TAG, "getGaugingStatus3() failed: %s", esp_err_to_name(gs3Err));
+        }
+
+        #define RELAX_CURRENT_THRESHOLD_MA 50
+        GaugingStatus gs = {};
+        esp_err_t gsErr = gauge.getGaugingStatus(gs);
+        if (gsErr == ESP_OK) {
+            const char *stateGuess;
+            if (!gs.dsg) {
+                stateGuess = "CHARGE";
+            } else if (vErr == ESP_OK && abs(packMa) <= RELAX_CURRENT_THRESHOLD_MA) {
+                stateGuess = gs.rest ? "RELAX (OCV already taken)" : "RELAX (OCV not taken yet)";
+            } else {
+                stateGuess = "DISCHARGE";
+            }
+            ESP_LOGI(TAG, "GaugingStatus raw: 0x%06lX -- state: %s", (unsigned long)gs.raw, stateGuess);
+            ESP_LOGI(TAG, "  DSG(chg not detected)=%d REST(OCV taken)=%d QEN=%d VOK=%d",
+                     gs.dsg, gs.rest, gs.qen, gs.vok);
+            ESP_LOGI(TAG, "  TC=%d TD=%d FC=%d FD=%d EDV=%d", gs.tc, gs.td, gs.fc, gs.fd, gs.edv);
+        } else {
+            ESP_LOGE(TAG, "getGaugingStatus() failed: %s", esp_err_to_name(gsErr));
+        }
+
+        GaugingStatus4 gs4 = {};
+        esp_err_t gs4Err = gauge.getGaugingStatus4(gs4);
+        if (gs4Err == ESP_OK) {
+            ESP_LOGI(TAG, "QMax: Cell5=%d mAh, Cell6=%d mAh", gs4.qmax5_mAh, gs4.qmax6_mAh);
+            ESP_LOGI(TAG, "QMax DOD0: Cell5=%d, Cell6=%d", gs4.qmaxDod0_5, gs4.qmaxDod0_6);
+        } else {
+            ESP_LOGE(TAG, "getGaugingStatus4() failed: %s", esp_err_to_name(gs4Err));
         }
 
         uint16_t designCapMah = 0;
