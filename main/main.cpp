@@ -224,7 +224,6 @@ extern "C" void app_main(void)
                     ESP_LOGI(TAG, "[Check] ManufacturingStatus chgEn=%d dsgEn=%d  vs  OperationStatus CHG=%d DSG=%d",
                              mfgNow.chgEn, mfgNow.dsgEn, op.chg, op.dsg);
 
-                    // CHG FET: open on OV trip, close again on OV recovery.
                     if (needOvCutoff && mfgNow.chgEn) {
                         ESP_LOGW(TAG, "Opening CHG FET (overvoltage, %d mV)...", maxCellMv);
                         esp_err_t toggleErr = gauge.toggleChargeFet();
@@ -252,7 +251,6 @@ extern "C" void app_main(void)
                         vTaskDelay(pdMS_TO_TICKS(300));
                     }
 
-                    // DSG FET: open on UV trip, latched off -- no auto-recovery.
                     if (needUvCutoff && mfgNow.dsgEn && !dsgLatchedOff) {
                         ESP_LOGW(TAG, "Opening DSG FET (undervoltage, %d mV) -- LATCHED, "
                                  "requires restart to clear", minCellMv);
@@ -371,6 +369,8 @@ extern "C" void app_main(void)
                      opStatus.chg, opStatus.dsg, opStatus.pchg, opStatus.pdsg, opStatus.fuse);
             ESP_LOGI(TAG, "  Present(PRES): %d, Initialized(INIT): %d, Sleep: %d",
                      opStatus.pres, opStatus.init, opStatus.sleep);
+            ESP_LOGI(TAG, "  CellBalancing(CB): %d (1=at least one bypass FET is currently active)",
+                     opStatus.cb);
         } else {
             ESP_LOGE(TAG, "getOperationStatus() failed: %s", esp_err_to_name(opErr));
         }
