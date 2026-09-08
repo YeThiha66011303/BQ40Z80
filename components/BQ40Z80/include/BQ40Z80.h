@@ -23,10 +23,21 @@
 //                                        Unsealed / Full Access mode.
 //   Layer 5  High-level convenience   - unseal(), reset(), etc. (built from
 //                                        Layers 3/4)
+//
+// !!! IMPORTANT - READ BEFORE USING ANYTHING MARKED "VERIFY vs TRM" !!!
+// Standard SBS commands (Layer 2) are part of the Smart Battery Data spec and
+// are safe to trust as-is. Anything BQ40Z80-specific -- ManufacturerAccess
+// subcommand codes, unseal/full-access keys, and ALL data flash addresses --
+// varies by firmware/configuration and is marked "VERIFY vs TRM" below as a
+// placeholder. Confirm every one of these against YOUR device's Technical
+// Reference Manual (SLUUBT5x) and/or .gg/.dffs data flash export BEFORE
+// issuing any write. An incorrect data flash write can corrupt configuration
+// or, in the worst case, leave the device permanently sealed/unusable.
 // =============================================================================
 
 // -----------------------------------------------------------------------------
 // Layer 2: Standard SBS command codes (Smart Battery Data spec, rev 1.1)
+// These are stable and safe -- identical across essentially all SBS gauges.
 // -----------------------------------------------------------------------------
 enum class SbsCommand : uint8_t {
     ManufacturerAccess     = 0x00,
@@ -64,6 +75,7 @@ enum class SbsCommand : uint8_t {
     ManufacturerData         = 0x23,   // block, paired with ManufacturerBlockAccess (0x44)
     ManufacturerBlockAccess  = 0x44,   // block
 
+    // --- Confirmed individual cell voltage commands (TI E2E forum, standard word reads) ---
     CellVoltage4    = 0x3C,
     CellVoltage3    = 0x3D,
     CellVoltage2    = 0x3E,
@@ -72,6 +84,7 @@ enum class SbsCommand : uint8_t {
 
 // -----------------------------------------------------------------------------
 // Layer 3: ManufacturerAccess() / ManufacturerBlockAccess() subcommands.
+// PLACEHOLDERS -- confirm every value against your BQ40Z80 TRM before use.
 // -----------------------------------------------------------------------------
 enum class MfaSubcommand : uint16_t {
     DeviceType      = 0x0001,  // VERIFY vs TRM
@@ -81,6 +94,8 @@ enum class MfaSubcommand : uint16_t {
     DAStatus3       = 0x007B,  // Confirmed vs TI E2E forum (was WRONG as 0x0073 --
                                 // 0x0073 is actually GaugingStatus1 per TRM ToC sec 18.1.55)
 
+    // --- Confirmed against TI BQ40Z80 TRM SLUUBT5C table of contents ---
+    // NOTE: these are RAM-only overrides -- state is lost on reset/seal.
     PdsgFetToggle   = 0x001C,  // Confirmed vs TRM SLUUBT5C sec 18.1.13 (pre-discharge)
     FuseToggle      = 0x001D,  // Confirmed vs TRM SLUUBT5C sec 18.1.14
     PchgFetToggle   = 0x001E,  // Confirmed vs TRM SLUUBT5C sec 18.1.15 (precharge)
@@ -105,14 +120,26 @@ enum class MfaSubcommand : uint16_t {
     GaugingStatus3   = 0x0075, // Confirmed vs TRM SLUUBT5C sec 18.1.57, layout confirmed
     GaugingStatus    = 0x0056, // Confirmed vs TRM SLUUBT5C sec 18.1.43, bits confirmed --
                                 // has the actual CHG/DSG/REST state bits
+    GaugingStatus1   = 0x0073, // Confirmed vs TRM SLUUBT5C sec 18.1.55, layout confirmed --
+                                // has CompRes (Cell Resistance) for cells 1-4
     GaugingStatus4   = 0x007C, // Confirmed vs TRM SLUUBT5C sec 18.1.64, layout confirmed --
                                 // QMax/QMaxDOD0 for cells 5-6
+
+    // Additional subcommands (SafetyAlert, PFAlert, PFStatus, Authenticate,
+    // Unseal-related keys, etc.) to be added
+    // here once confirmed vs TRM.
 };
 
 // -----------------------------------------------------------------------------
 // Parsed result structs for extended (Layer 3) block reads
 // -----------------------------------------------------------------------------
 struct DAStatus1 {
+    // Layout cross-validated against: (1) TI E2E forum confirming DAStatus1
+    // returns "cell voltages, pack voltage, bat voltage, cell currents, cell
+    // powers, power, and average power" as a 32-byte block, and (2) matches
+    // real-world field order/units used by multiple independent BQ40-family
+    // SBS drivers. All fields are little-endian int16_t words (16 words = 32
+    // bytes total, matching TI's confirmed block size).
     int16_t cellVoltage1_mV;
     int16_t cellVoltage2_mV;
     int16_t cellVoltage3_mV;
@@ -134,6 +161,9 @@ struct DAStatus1 {
 };
 
 struct DAStatus3 {
+    // Confirmed directly from BQ40Z80 TRM (SLUUBT5C, page 143, sec 18.1.63):
+    // 18 bytes = 9 little-endian int16_t words, interleaved per cell as
+    // (voltage, current, power) for cells 5, 6, 7 in that order.
     int16_t cellVoltage5_mV;
     int16_t cellCurrent5_mA;
     int16_t cellPower5;      // cW
@@ -148,6 +178,7 @@ struct DAStatus3 {
 };
 
 struct OperationStatus {
+    // Confirmed directly from BQ40Z80 TRM (SLUUBT5C, page 129, sec 18.1.41).
     bool iataCterm;   // Bit31: IATA charge control
     bool emShut;      // Bit29: Emergency FET shutdown
     bool cb;          // Bit28: Cell balancing status
@@ -191,6 +222,7 @@ inline const char *operationStatusSecName(uint8_t sec) {
 }
 
 struct SafetyStatus {
+    // Confirmed directly from BQ40Z80 TRM (SLUUBT5C, page 123, sec 18.1.38).
     bool ocdl;   // Bit29: Overcurrent in discharge (latch)
     bool covl;   // Bit28: Cell overvoltage latch
     bool utd;    // Bit27: Undertemperature during discharge
@@ -221,6 +253,8 @@ struct SafetyStatus {
 };
 
 struct ManufacturingStatus {
+    // Confirmed directly from BQ40Z80 TRM (SLUUBT5C, page 135, sec 18.1.44).
+    // 16-bit value (not 32-bit like OperationStatus/SafetyStatus).
     bool calEn;    // Bit15: CALIBRATION mode
     bool ltTest;   // Bit14: LIFETIME SPEED UP mode
     bool pdsgEn;   // Bit13: Pre-discharge FET test activated
@@ -239,6 +273,8 @@ struct ManufacturingStatus {
 };
 
 struct GaugingStatus3 {
+    // Confirmed directly from BQ40Z80 TRM (SLUUBT5C, page 142, sec 18.1.57).
+    // 32 bytes = 16 little-endian int16_t words.
     int16_t qmax1_mAh;   // QMax of Cell 1
     int16_t qmax2_mAh;   // QMax of Cell 2
     int16_t qmax3_mAh;   // QMax of Cell 3
@@ -259,6 +295,9 @@ struct GaugingStatus3 {
 };
 
 struct GaugingStatus {
+    // Confirmed directly from BQ40Z80 TRM (SLUUBT5C, page 133, sec 18.1.43).
+    // 24-bit value; read robustly (actual byte count from device, 3 or 4).
+    // This is the actual charge/discharge/relax state register.
     bool ocvfr;    // Bit20: OCV in flat region (during RELAX)
     bool ldmd;     // Bit19: LOAD mode (1=Constant Power, 0=Constant Current)
     bool rx;       // Bit18: Resistance update (toggles after every update)
@@ -282,7 +321,32 @@ struct GaugingStatus {
     uint32_t raw;
 };
 
+struct GaugingStatus1 {
+    // Confirmed directly from BQ40Z80 TRM (SLUUBT5C, page 140, sec 18.1.55).
+    // 32 bytes = 16 little-endian int16_t words.
+    int16_t trueRemQ_mAh;
+    int16_t trueRemE_cWh;
+    int16_t initialQ_mAh;
+    int16_t initialE_cWh;
+    int16_t trueFccQ_mAh;
+    int16_t trueFccE_cWh;
+    int16_t tSim;       // 0.1K
+    int16_t tAmbient;   // 0.1K
+    int16_t raScale1;
+    int16_t raScale2;
+    int16_t raScale3;
+    int16_t raScale4;
+    int16_t compRes1;   // Cell Resistance, Cell 1 (2-10 ohm range) -- the R
+    int16_t compRes2;   // value used in the CUVC compensation formula
+    int16_t compRes3;
+    int16_t compRes4;
+    uint8_t rawLen;
+};
+
+
 struct GaugingStatus4 {
+    // Confirmed directly from BQ40Z80 TRM (SLUUBT5C, page 144, sec 18.1.64).
+    // 30 bytes: 7 words + 1 byte for Cell 5, then 7 words + 1 byte for Cell 6.
     int16_t raScale5;      // Cell 5
     int16_t compRes5;
     int16_t dod0_5;
@@ -311,15 +375,22 @@ class BQ40Z80 {
 public:
     static constexpr uint8_t  kDefaultAddress = 0x0B;
 
-   static constexpr uint16_t kDefaultUnsealKeyWord1     = 0x0414;  // VERIFY vs TRM / your pack
+    // PLACEHOLDERS -- TI's commonly-published default unseal/full-access keys
+    // are shown split into two 16-bit words below for reference, but keys are
+    // frequently changed per-customer in production firmware. Do not assume
+    // these are correct for your specific pack; verify before use.
+    static constexpr uint16_t kDefaultUnsealKeyWord1     = 0x0414;  // VERIFY vs TRM / your pack
     static constexpr uint16_t kDefaultUnsealKeyWord2     = 0x3672;  // VERIFY vs TRM / your pack
     static constexpr uint16_t kDefaultFullAccessKeyWord1 = 0xFFFF;  // VERIFY vs TRM / your pack
     static constexpr uint16_t kDefaultFullAccessKeyWord2 = 0xFFFF;  // VERIFY vs TRM / your pack
 
+    // ---- Construction / lifecycle ------------------------------------------
     BQ40Z80(gpio_num_t sclPin, gpio_num_t sdaPin, i2c_port_t port,
             uint8_t deviceAddress = kDefaultAddress, uint32_t clockHz = 100000);
     ~BQ40Z80();
 
+    // Installs and configures the I2C driver on the given port/pins.
+    // Must be called once before any other method.
     esp_err_t begin();
 
     void setPecEnabled(bool enabled) { pecEnabled_ = enabled; }
@@ -342,6 +413,7 @@ public:
     esp_err_t getBatteryStatus(uint16_t &flags);
     esp_err_t getCycleCount(uint16_t &cycles);
     esp_err_t getDesignCapacity(uint16_t &mAh);
+    esp_err_t setDesignCapacity(uint16_t mAh);
     esp_err_t getDesignVoltage(uint16_t &mV);
     esp_err_t getSerialNumber(uint16_t &serial);
     esp_err_t getManufactureDate(uint16_t &packedDate);   // (year-1980)<<9 | month<<5 | day
@@ -360,9 +432,9 @@ public:
     // ---- Layer 3/5: charge/discharge/precharge/pre-discharge FET control --------
     esp_err_t toggleChargeFet();
     esp_err_t toggleDischargeFet();
-    esp_err_t togglePrechargeFet();     
-    esp_err_t togglePreDischargeFet();  
-    esp_err_t toggleFuse();             
+    esp_err_t togglePrechargeFet();     // PCHG FET, 0x001E -- precharge path only
+    esp_err_t togglePreDischargeFet();  // PDSG FET, 0x001C -- pre-discharge path only
+    esp_err_t toggleFuse();             // 0x001D -- WARNING: can be a one-way/destructive
     esp_err_t toggleFetEnable();
 
     esp_err_t toggleGaugingEnable();
@@ -393,11 +465,19 @@ public:
     esp_err_t getGaugingStatus3(GaugingStatus3 &out);
 
     esp_err_t getGaugingStatus(GaugingStatus &out);
+    esp_err_t getGaugingStatus1(GaugingStatus1 &out); // CompRes (Cell Resistance) for cells 1-4
     esp_err_t getGaugingStatus4(GaugingStatus4 &out);
 
     // ---- Layer 4: data flash (raw) --------------------------------------------
     esp_err_t readDataFlash(uint16_t flashAddress, uint8_t *data, uint8_t len);
     esp_err_t writeDataFlash(uint16_t flashAddress, const uint8_t *data, uint8_t len);
+
+    esp_err_t getDaConfigurationNR(bool &nr, uint16_t &rawValue);
+
+    esp_err_t getCounterDecDelayOCD(uint8_t &seconds);
+    esp_err_t getCounterDecDelayAOLD(uint8_t &seconds);
+    esp_err_t getCounterDecDelayASCC(uint8_t &seconds);
+    esp_err_t getCounterDecDelayASCD(uint8_t &seconds);
 
     // ---- Layer 1: raw primitives (exposed for advanced/custom use) ------------
     esp_err_t smbusReadWord(uint8_t command, uint16_t &value);

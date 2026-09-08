@@ -9,9 +9,9 @@ static const char *TAG = "app_main";
 
 #define SDA_PIN GPIO_NUM_11
 #define SCL_PIN GPIO_NUM_12
-
 #define RUN_FET_TOGGLE_TEST 0
-
+#define RUN_MANUAL_MODE_BOTH_FETS_ON 0
+#define RUN_READ_NR_AND_COUNTER_DEC_DELAY 0
 #define RUN_GAUGE_CYCLE_TEST 0
 
 extern "C" void app_main(void)
@@ -159,7 +159,7 @@ extern "C" void app_main(void)
         ESP_LOGW(TAG, "GAUGE_EN was not 1 before starting -- skipping cycle to avoid leaving it wrong.");
     }
 
-    vTaskDelay(pdMS_TO_TICKS(2000)); // give the gauge a moment to process the fresh trigger
+    vTaskDelay(pdMS_TO_TICKS(2000)); 
 
     GaugingStatus3 gs3After = {};
     if (gauge.getGaugingStatus3(gs3After) == ESP_OK) {
@@ -167,6 +167,78 @@ extern "C" void app_main(void)
                  gs3After.qmaxTime, gs3After.qmaxPassedQ_mAh);
     }
     ESP_LOGI(TAG, "=== GAUGE_EN cycle test complete ===");
+#endif
+
+#if RUN_MANUAL_MODE_BOTH_FETS_ON
+    ESP_LOGI(TAG, "=== Entering manual mode, forcing both FETs ON ===");
+
+    ManufacturingStatus mfgStart2 = {};
+    if (gauge.getManufacturingStatus(mfgStart2) == ESP_OK) {
+        ESP_LOGI(TAG, "FET_EN before: %d", mfgStart2.fetEn);
+        if (mfgStart2.fetEn) {
+            gauge.toggleFetEnable();
+            vTaskDelay(pdMS_TO_TICKS(300));
+            ManufacturingStatus mfgCheck2 = {};
+            if (gauge.getManufacturingStatus(mfgCheck2) == ESP_OK) {
+                ESP_LOGI(TAG, "FET_EN after toggle: %d (expect 0)", mfgCheck2.fetEn);
+            }
+        } else {
+            ESP_LOGI(TAG, "FET_EN already 0 (manual mode already active).");
+        }
+    }
+
+    OperationStatus opStart2 = {};
+    if (gauge.getOperationStatus(opStart2) == ESP_OK) {
+        ESP_LOGI(TAG, "Before: CHG FET=%d, DSG FET=%d", opStart2.chg, opStart2.dsg);
+
+        if (!opStart2.chg) {
+            ESP_LOGI(TAG, "Turning CHG FET ON...");
+            gauge.toggleChargeFet();
+            vTaskDelay(pdMS_TO_TICKS(300));
+        }
+        if (!opStart2.dsg) {
+            ESP_LOGI(TAG, "Turning DSG FET ON...");
+            gauge.toggleDischargeFet();
+            vTaskDelay(pdMS_TO_TICKS(300));
+        }
+    }
+
+    OperationStatus opFinal2 = {};
+    if (gauge.getOperationStatus(opFinal2) == ESP_OK) {
+        ESP_LOGI(TAG, "Final: CHG FET=%d, DSG FET=%d (expect both 1)", opFinal2.chg, opFinal2.dsg);
+    }
+    ESP_LOGI(TAG, "=== Ready -- set EL15 to 1A CC discharge now, watch SafetyStatus/CHG FET/DSG FET below ===");
+#endif
+
+#if RUN_READ_NR_AND_COUNTER_DEC_DELAY
+    ESP_LOGI(TAG, "=== Reading DA Configuration[NR] and Counter Dec Delay values ===");
+
+    bool nr = false;
+    uint16_t daConfigRaw = 0;
+    esp_err_t nrErr = gauge.getDaConfigurationNR(nr, daConfigRaw);
+    if (nrErr == ESP_OK) {
+        ESP_LOGI(TAG, "DA Configuration raw: 0x%04X -- NR=%d (%s)", daConfigRaw, nr,
+                 nr ? "NON-REMOVABLE, clears via Reset time" : "REMOVABLE (default), clears via PRES transition");
+    } else {
+        ESP_LOGE(TAG, "getDaConfigurationNR() failed: %s", esp_err_to_name(nrErr));
+    }
+
+    uint8_t ocdDelay = 0, aoldDelay = 0, asccDelay = 0, ascdDelay = 0;
+    if (gauge.getCounterDecDelayOCD(ocdDelay) == ESP_OK) {
+        ESP_LOGI(TAG, "OCD Counter Dec Delay: %d s", ocdDelay);
+    }
+    if (gauge.getCounterDecDelayAOLD(aoldDelay) == ESP_OK) {
+        ESP_LOGI(TAG, "AOLD Counter Dec Delay: %d s", aoldDelay);
+    }
+    if (gauge.getCounterDecDelayASCC(asccDelay) == ESP_OK) {
+        ESP_LOGI(TAG, "ASCC Counter Dec Delay: %d s", asccDelay);
+    }
+    if (gauge.getCounterDecDelayASCD(ascdDelay) == ESP_OK) {
+        ESP_LOGI(TAG, "ASCD Counter Dec Delay: %d s", ascdDelay);
+    }
+    ESP_LOGI(TAG, "NOTE: your observed faults (OC, OCC/CHGC) don't use this counter/latch "
+             "mechanism at all -- they use a simple threshold-based Recovery instead.");
+    ESP_LOGI(TAG, "=== Done reading NR / Counter Dec Delay ===");
 #endif
 
     while (1) {
@@ -457,11 +529,22 @@ extern "C" void app_main(void)
             ESP_LOGE(TAG, "getGaugingStatus() failed: %s", esp_err_to_name(gsErr));
         }
 
+        GaugingStatus1 gs1 = {};
+        esp_err_t gs1Err = gauge.getGaugingStatus1(gs1);
+        if (gs1Err == ESP_OK) {
+            ESP_LOGI(TAG, "Cell Resistance (CompRes): Cell1=%d, Cell2=%d, Cell3=%d, Cell4=%d (2-10 ohm range)",
+                     gs1.compRes1, gs1.compRes2, gs1.compRes3, gs1.compRes4);
+        } else {
+            ESP_LOGE(TAG, "getGaugingStatus1() failed: %s", esp_err_to_name(gs1Err));
+        }
+
         GaugingStatus4 gs4 = {};
         esp_err_t gs4Err = gauge.getGaugingStatus4(gs4);
         if (gs4Err == ESP_OK) {
             ESP_LOGI(TAG, "QMax: Cell5=%d mAh, Cell6=%d mAh", gs4.qmax5_mAh, gs4.qmax6_mAh);
             ESP_LOGI(TAG, "QMax DOD0: Cell5=%d, Cell6=%d", gs4.qmaxDod0_5, gs4.qmaxDod0_6);
+            ESP_LOGI(TAG, "Cell Resistance (CompRes): Cell5=%d, Cell6=%d (2-10 ohm range)",
+                     gs4.compRes5, gs4.compRes6);
         } else {
             ESP_LOGE(TAG, "getGaugingStatus4() failed: %s", esp_err_to_name(gs4Err));
         }
@@ -473,6 +556,7 @@ extern "C" void app_main(void)
         } else {
             ESP_LOGE(TAG, "getDesignCapacity() failed: %s", esp_err_to_name(designCapErr));
         }
+
 
         uint16_t remainCapMah = 0;
         esp_err_t remainCapErr = gauge.getRemainingCapacity(remainCapMah);

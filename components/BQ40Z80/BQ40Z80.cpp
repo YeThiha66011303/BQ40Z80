@@ -142,6 +142,12 @@ esp_err_t BQ40Z80::smbusReadBlockOnce(uint8_t command, uint8_t *data, uint8_t &l
     i2c_master_write_byte(cmd, (uint8_t)((address_ << 1) | I2C_MASTER_READ), true);
     i2c_master_read_byte(cmd, &countByte, I2C_MASTER_ACK);
 
+    // We don't know countByte's value yet at command-build time (the i2c
+    // driver requires the read length to be fixed when the command list is
+    // built), so we conservatively queue reads for the max block size (32
+    // bytes) and only interpret the first countByte of them afterward. The
+    // very last byte read in the transaction must be NACK'd to terminate it
+    // correctly -- which byte that is depends on whether PEC is enabled.
     for (int i = 0; i < 32; i++) {
         bool isLastByte = (i == 31) && !pecEnabled_;
         i2c_master_read_byte(cmd, &buf[i], isLastByte ? I2C_MASTER_NACK : I2C_MASTER_ACK);
@@ -333,6 +339,49 @@ esp_err_t BQ40Z80::manufacturerBlockWrite(uint16_t subcommand, const uint8_t *da
     return smbusWriteBlock(static_cast<uint8_t>(SbsCommand::ManufacturerBlockAccess), payload, (uint8_t)(2 + len));
 }
 
+esp_err_t BQ40Z80::readDataFlash(uint16_t flashAddress, uint8_t *data, uint8_t len) {
+    // Data flash addresses (e.g. 0x4D03) use the SAME ManufacturerBlockAccess
+    // mechanism as MAC subcommands -- TI's addressing ranges don't overlap
+    // (MAC subcommands live in 0x00xx, data flash lives much higher, e.g.
+    // 0x4000+), so the existing generic block-read primitive works as-is.
+    // CAUTION: only call with addresses confirmed directly from the TRM's
+    // Table 19-1 Data Flash Table -- do not guess addresses.
+    uint8_t rawLen = 0;
+    return manufacturerBlockRead(flashAddress, data, rawLen, len);
+}
+
+esp_err_t BQ40Z80::writeDataFlash(uint16_t flashAddress, const uint8_t *data, uint8_t len) {
+    // Same addressing scheme as readDataFlash. WRITES are genuinely
+    // consequential -- confirm address, type, and byte order against the
+    // TRM before ever calling this.
+    return manufacturerBlockWrite(flashAddress, data, len);
+}
+
+esp_err_t BQ40Z80::getDaConfigurationNR(bool &nr, uint16_t &rawValue) {
+    uint8_t raw[2] = {0};
+    esp_err_t err = readDataFlash(0x4D03, raw, 2);
+    if (err != ESP_OK) return err;
+    rawValue = (uint16_t)raw[0] | ((uint16_t)raw[1] << 8);
+    nr = (rawValue >> 2) & 1; // Bit 2, confirmed TRM sec 19.2.1.15
+    return ESP_OK;
+}
+
+esp_err_t BQ40Z80::getCounterDecDelayOCD(uint8_t &seconds) {
+    return readDataFlash(0x4BF7, &seconds, 1);
+}
+
+esp_err_t BQ40Z80::getCounterDecDelayAOLD(uint8_t &seconds) {
+    return readDataFlash(0x4BFA, &seconds, 1);
+}
+
+esp_err_t BQ40Z80::getCounterDecDelayASCC(uint8_t &seconds) {
+    return readDataFlash(0x4BFE, &seconds, 1);
+}
+
+esp_err_t BQ40Z80::getCounterDecDelayASCD(uint8_t &seconds) {
+    return readDataFlash(0x4C02, &seconds, 1);
+}
+
 esp_err_t BQ40Z80::reset() {
     // Confirmed vs TRM SLUUBT5C sec 18.1.36: writing 0x0041 to
     // ManufacturerAccess() resets the device.
@@ -518,6 +567,10 @@ esp_err_t BQ40Z80::getGaugingStatus3(GaugingStatus3 &out) {
 }
 
 esp_err_t BQ40Z80::getGaugingStatus(GaugingStatus &out) {
+    // 24-bit value -- byte count not explicitly stated in TRM prose (unlike
+    // OperationStatus/SafetyStatus which are confirmed 4 bytes). Read
+    // robustly: request up to 4 bytes, use whatever the device actually
+    // returns rather than assuming.
     uint8_t raw[4] = {0};
     uint8_t rawLen = 0;
     esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::GaugingStatus),
@@ -548,6 +601,37 @@ esp_err_t BQ40Z80::getGaugingStatus(GaugingStatus &out) {
     out.td      = (v >> 2) & 1;
     out.fc      = (v >> 1) & 1;
     out.fd      = (v >> 0) & 1;
+
+    return ESP_OK;
+}
+
+esp_err_t BQ40Z80::getGaugingStatus1(GaugingStatus1 &out) {
+    uint8_t raw[32] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::GaugingStatus1),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+
+    out.rawLen = rawLen;
+    if (rawLen < 32) return ESP_ERR_INVALID_SIZE;
+
+    int16_t *words = reinterpret_cast<int16_t *>(raw);
+    out.trueRemQ_mAh  = words[0];
+    out.trueRemE_cWh  = words[1];
+    out.initialQ_mAh  = words[2];
+    out.initialE_cWh  = words[3];
+    out.trueFccQ_mAh  = words[4];
+    out.trueFccE_cWh  = words[5];
+    out.tSim          = words[6];
+    out.tAmbient      = words[7];
+    out.raScale1      = words[8];
+    out.raScale2      = words[9];
+    out.raScale3      = words[10];
+    out.raScale4      = words[11];
+    out.compRes1      = words[12];
+    out.compRes2      = words[13];
+    out.compRes3      = words[14];
+    out.compRes4      = words[15];
 
     return ESP_OK;
 }
@@ -620,6 +704,12 @@ esp_err_t BQ40Z80::getFullChargeCapacity(uint16_t &mAh) {
 
 esp_err_t BQ40Z80::getDesignCapacity(uint16_t &mAh) {
     return smbusReadWord(static_cast<uint8_t>(SbsCommand::DesignCapacity), mAh);
+}
+
+esp_err_t BQ40Z80::setDesignCapacity(uint16_t mAh) {
+    // Confirmed writable in Unsealed/FullAccess (TRM sec 18.25). Standard
+    // SBS word write -- assumes BatteryMode()[CAPM]=0 (mAh units, not cWh).
+    return smbusWriteWord(static_cast<uint8_t>(SbsCommand::DesignCapacity), mAh);
 }
 
 esp_err_t BQ40Z80::getCellVoltage1(uint16_t &mV) {
