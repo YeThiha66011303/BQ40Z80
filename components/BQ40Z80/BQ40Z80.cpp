@@ -124,8 +124,6 @@ esp_err_t BQ40Z80::smbusWriteWordOnce(uint8_t command, uint16_t value) {
 
 // =============================================================================
 // Layer 1: block read/write, e.g. ManufacturerName(), ManufacturerData(), etc.
-// SMBus block protocol: command byte, then a device-reported byte-count byte,
-// then that many data bytes, then PEC (if enabled).
 // =============================================================================
 esp_err_t BQ40Z80::smbusReadBlockOnce(uint8_t command, uint8_t *data, uint8_t &len, uint8_t maxLen) {
     if (!initialized_) return ESP_ERR_INVALID_STATE;
@@ -142,12 +140,6 @@ esp_err_t BQ40Z80::smbusReadBlockOnce(uint8_t command, uint8_t *data, uint8_t &l
     i2c_master_write_byte(cmd, (uint8_t)((address_ << 1) | I2C_MASTER_READ), true);
     i2c_master_read_byte(cmd, &countByte, I2C_MASTER_ACK);
 
-    // We don't know countByte's value yet at command-build time (the i2c
-    // driver requires the read length to be fixed when the command list is
-    // built), so we conservatively queue reads for the max block size (32
-    // bytes) and only interpret the first countByte of them afterward. The
-    // very last byte read in the transaction must be NACK'd to terminate it
-    // correctly -- which byte that is depends on whether PEC is enabled.
     for (int i = 0; i < 32; i++) {
         bool isLastByte = (i == 31) && !pecEnabled_;
         i2c_master_read_byte(cmd, &buf[i], isLastByte ? I2C_MASTER_NACK : I2C_MASTER_ACK);
@@ -164,7 +156,6 @@ esp_err_t BQ40Z80::smbusReadBlockOnce(uint8_t command, uint8_t *data, uint8_t &l
     if (countByte > 32) countByte = 32; // guard against garbage/corrupt count byte
 
     if (pecEnabled_) {
-        // PEC input: [addr+W, command, addr+R, countByte, data...]
         uint8_t pecInput[4 + 32] = {0};
         pecInput[0] = (uint8_t)((address_ << 1) | I2C_MASTER_WRITE);
         pecInput[1] = command;
@@ -212,21 +203,12 @@ esp_err_t BQ40Z80::smbusWriteBlockOnce(uint8_t command, const uint8_t *data, uin
     return err;
 }
 
-// =============================================================================
-// Bus recovery: manually bit-bang up to 9 SCL pulses (releasing the I2C
-// peripheral's control of the pins temporarily) to force a wedged slave to
-// release SDA, then issue a manual STOP condition, then reinitialize the I2C
-// driver. Standard I2C/SMBus bus-recovery pattern -- not BQ40Z80-specific.
-// =============================================================================
 esp_err_t BQ40Z80::recoverBus() {
     if (initialized_) {
         i2c_driver_delete(port_);
         initialized_ = false;
     }
 
-    // Configure both lines as open-drain GPIO so we can bit-bang them like
-    // the bus naturally works: only ever drive low, or release (let the
-    // external pull-up bring the line high).
     gpio_config_t ioConf = {};
     ioConf.mode = GPIO_MODE_INPUT_OUTPUT_OD;
     ioConf.pull_up_en = GPIO_PULLUP_DISABLE; // external pull-ups already present
@@ -251,7 +233,6 @@ esp_err_t BQ40Z80::recoverBus() {
         esp_rom_delay_us(5);
     }
 
-    // Manual STOP condition: SDA low->high while SCL is high.
     gpio_set_level(sdaPin_, 0);
     esp_rom_delay_us(5);
     gpio_set_level(sclPin_, 1);
@@ -259,7 +240,6 @@ esp_err_t BQ40Z80::recoverBus() {
     gpio_set_level(sdaPin_, 1);
     esp_rom_delay_us(5);
 
-    // Hand the pins back to the I2C peripheral.
     esp_err_t err = begin();
     if (err != ESP_OK) return err;
 
@@ -268,7 +248,6 @@ esp_err_t BQ40Z80::recoverBus() {
 
 // =============================================================================
 // Public Layer 1 wrappers: one automatic recoverBus() + retry on
-// ESP_ERR_TIMEOUT, so a wedged bus self-heals instead of failing forever.
 // =============================================================================
 esp_err_t BQ40Z80::smbusReadWord(uint8_t command, uint16_t &value) {
     esp_err_t err = smbusReadWordOnce(command, value);
@@ -340,20 +319,11 @@ esp_err_t BQ40Z80::manufacturerBlockWrite(uint16_t subcommand, const uint8_t *da
 }
 
 esp_err_t BQ40Z80::readDataFlash(uint16_t flashAddress, uint8_t *data, uint8_t len) {
-    // Data flash addresses (e.g. 0x4D03) use the SAME ManufacturerBlockAccess
-    // mechanism as MAC subcommands -- TI's addressing ranges don't overlap
-    // (MAC subcommands live in 0x00xx, data flash lives much higher, e.g.
-    // 0x4000+), so the existing generic block-read primitive works as-is.
-    // CAUTION: only call with addresses confirmed directly from the TRM's
-    // Table 19-1 Data Flash Table -- do not guess addresses.
     uint8_t rawLen = 0;
     return manufacturerBlockRead(flashAddress, data, rawLen, len);
 }
 
 esp_err_t BQ40Z80::writeDataFlash(uint16_t flashAddress, const uint8_t *data, uint8_t len) {
-    // Same addressing scheme as readDataFlash. WRITES are genuinely
-    // consequential -- confirm address, type, and byte order against the
-    // TRM before ever calling this.
     return manufacturerBlockWrite(flashAddress, data, len);
 }
 
@@ -383,8 +353,6 @@ esp_err_t BQ40Z80::getCounterDecDelayASCD(uint8_t &seconds) {
 }
 
 esp_err_t BQ40Z80::reset() {
-    // Confirmed vs TRM SLUUBT5C sec 18.1.36: writing 0x0041 to
-    // ManufacturerAccess() resets the device.
     return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::DeviceReset));
 }
 
@@ -454,14 +422,10 @@ esp_err_t BQ40Z80::toggleFuse() {
 }
 
 esp_err_t BQ40Z80::toggleFetEnable() {
-    // Confirmed vs TRM SLUUBT5C sec 18.1.19: pure toggle of
-    // ManufacturingStatus()[FET_EN]. See header comment for full semantics.
     return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::FetControl));
 }
 
 esp_err_t BQ40Z80::toggleGaugingEnable() {
-    // Confirmed vs TRM SLUUBT5C sec 18.1.18: pure toggle of
-    // ManufacturingStatus()[GAUGE_EN].
     return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::Gauging));
 }
 
@@ -567,10 +531,6 @@ esp_err_t BQ40Z80::getGaugingStatus3(GaugingStatus3 &out) {
 }
 
 esp_err_t BQ40Z80::getGaugingStatus(GaugingStatus &out) {
-    // 24-bit value -- byte count not explicitly stated in TRM prose (unlike
-    // OperationStatus/SafetyStatus which are confirmed 4 bytes). Read
-    // robustly: request up to 4 bytes, use whatever the device actually
-    // returns rather than assuming.
     uint8_t raw[4] = {0};
     uint8_t rawLen = 0;
     esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::GaugingStatus),
@@ -693,7 +653,6 @@ esp_err_t BQ40Z80::getCurrent(int16_t &mA) {
     return err;
 }
 
-// ---- Individual cell voltages (confirmed direct word reads, cells 1-4) --------
 esp_err_t BQ40Z80::getRemainingCapacity(uint16_t &mAh) {
     return smbusReadWord(static_cast<uint8_t>(SbsCommand::RemainingCapacity), mAh);
 }
@@ -707,8 +666,6 @@ esp_err_t BQ40Z80::getDesignCapacity(uint16_t &mAh) {
 }
 
 esp_err_t BQ40Z80::setDesignCapacity(uint16_t mAh) {
-    // Confirmed writable in Unsealed/FullAccess (TRM sec 18.25). Standard
-    // SBS word write -- assumes BatteryMode()[CAPM]=0 (mAh units, not cWh).
     return smbusWriteWord(static_cast<uint8_t>(SbsCommand::DesignCapacity), mAh);
 }
 
@@ -725,7 +682,6 @@ esp_err_t BQ40Z80::getCellVoltage4(uint16_t &mV) {
     return smbusReadWord(static_cast<uint8_t>(SbsCommand::CellVoltage4), mV);
 }
 
-// ---- DAStatus1 (0x0071) -- confirmed 16-word layout, see struct comment ------
 esp_err_t BQ40Z80::readDAStatus1(DAStatus1 &out) {
     uint8_t raw[32] = {0};
     uint8_t rawLen = 0;
@@ -737,7 +693,6 @@ esp_err_t BQ40Z80::readDAStatus1(DAStatus1 &out) {
     if (rawLen < 32) return ESP_ERR_INVALID_SIZE; // shouldn't happen, but guard anyway
     memcpy(out.raw, raw, 32);
 
-    // Little-endian int16_t words, in the confirmed field order.
     int16_t *words = reinterpret_cast<int16_t *>(raw);
     out.cellVoltage1_mV = words[0];
     out.cellVoltage2_mV = words[1];
@@ -768,8 +723,6 @@ esp_err_t BQ40Z80::getBatVoltage(uint16_t &mV) {
     return err;
 }
 
-// ---- DAStatus3 (0x007B) -- confirmed 9-word interleaved layout, see struct ---
-// ---- comment above (TRM SLUUBT5C page 143, sec 18.1.63) ----------------------
 esp_err_t BQ40Z80::readDAStatus3(DAStatus3 &out) {
     uint8_t raw[18] = {0};
     uint8_t rawLen = 0;
