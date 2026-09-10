@@ -78,6 +78,9 @@ enum class SbsCommand : uint8_t {
 enum class MfaSubcommand : uint16_t {
     DeviceType      = 0x0001,  // VERIFY vs TRM
     FirmwareVersion = 0x0002,  // VERIFY vs TRM
+    ChemicalId      = 0x0006,  // Confirmed vs TRM SLUUBT5C sec 17 example. READ-ONLY.
+                                // Returns the loaded chemistry ID. 4xx series = LiFePO4.
+                                // 0x0100 (chem 100) is the Li-ion default.
     DAStatus1       = 0x0071,  // VERIFY vs TRM (cell voltages, pack V/I/power)
     DAStatus2       = 0x0072,  // Confirmed vs TRM SLUUBT5C ToC sec 18.1.54
     DAStatus3       = 0x007B,  // Confirmed vs TI E2E forum (was WRONG as 0x0073 --
@@ -308,6 +311,37 @@ struct GaugingStatus1 {
 };
 
 
+struct OvercurrentConfig {
+    int16_t occ1Threshold_mA;   // 0x4BE4, TI default  6000
+    uint8_t occ1Delay_s;        // 0x4BE6, TI default     6
+    int16_t occ2Threshold_mA;   // 0x4BE7, TI default  8000
+    uint8_t occ2Delay_s;        // 0x4BE9, TI default     3
+    int16_t ocd1Threshold_mA;   // 0x4BED, TI default -6000
+    uint8_t ocd1Delay_s;        // 0x4BEF, TI default     6
+    int16_t ocd2Threshold_mA;   // 0x4BF0, TI default -8000
+    uint8_t ocd2Delay_s;        // 0x4BF2, TI default     3
+};
+
+struct ChargingCurrentConfig {
+    // index 0 = voltage range Low, 1 = Med, 2 = High
+    int16_t stdTempLow_mA[3];   // 0x4CA9 / 0x4CAB / 0x4CAD, TI defaults 1980 / 4004 / 2992
+    int16_t stdTempHigh_mA[3];  // 0x4CB1 / 0x4CB3 / 0x4CB5, TI defaults 1980 / 4004 / 2992
+    int16_t recTemp_mA[3];      // 0x4CC1 / 0x4CC3 / 0x4CC5, TI defaults 2508 / 4488 / 3520
+};
+
+struct CellVoltageLimits {
+    int16_t covThresholdStdTempLow_mV;      // 0x4BCE, TI default 4300 (Li-ion)
+    int16_t covThresholdStdTempHigh_mV;     // 0x4BD0, TI default 4300 (Li-ion)
+    int16_t covRecoveryStdTempLow_mV;       // 0x4BD9, TI default 3900 (Li-ion)
+    int16_t cuvThreshold_mV;                // 0x4BC2, TI default 2500
+    int16_t cuvRecovery_mV;                 // 0x4BC5, TI default 3000
+    int16_t chargingVoltageStdTempLow_mV;   // 0x4CA7, TI default 4200 (Li-ion)
+    int16_t chargingVoltageStdTempHigh_mV;  // 0x4CAF, TI default 4200 (Li-ion)
+    int16_t voltageRangeLow_mV;             // 0x4CCD, TI default 2900
+    int16_t voltageRangeMed_mV;             // 0x4CCF, TI default 3600
+    int16_t voltageRangeHigh_mV;            // 0x4CD1, TI default 4000
+};
+
 struct GaugingStatus4 {
     int16_t raScale5;      // Cell 5
     int16_t compRes5;
@@ -429,6 +463,12 @@ public:
     esp_err_t writeDataFlash(uint16_t flashAddress, const uint8_t *data, uint8_t len);
 
     esp_err_t getDaConfigurationNR(bool &nr, uint16_t &rawValue);
+
+    esp_err_t getOvercurrentConfig(OvercurrentConfig &out);
+    esp_err_t getChargingCurrentConfig(ChargingCurrentConfig &out);
+    esp_err_t getCellVoltageLimits(CellVoltageLimits &out);
+
+    esp_err_t getChemId(uint16_t &chemId);
 
     esp_err_t getCounterDecDelayOCD(uint8_t &seconds);
     esp_err_t getCounterDecDelayAOLD(uint8_t &seconds);

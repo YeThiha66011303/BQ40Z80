@@ -13,6 +13,7 @@ static const char *TAG = "app_main";
 #define RUN_MANUAL_MODE_BOTH_FETS_ON 0
 #define RUN_READ_NR_AND_COUNTER_DEC_DELAY 0
 #define RUN_GAUGE_CYCLE_TEST 0
+#define RUN_READ_CURRENT_LIMITS 1
 
 extern "C" void app_main(void)
 {
@@ -241,11 +242,101 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "=== Done reading NR / Counter Dec Delay ===");
 #endif
 
+#if RUN_READ_CURRENT_LIMITS
+    ESP_LOGI(TAG, "=== Reading ACTUAL configured current limits from this device ===");
+    ESP_LOGI(TAG, "(datasheet Table 7-1 is an EXAMPLE config, not this pack's settings)");
+
+    OvercurrentConfig occ = {};
+    esp_err_t occErr = gauge.getOvercurrentConfig(occ);
+    if (occErr == ESP_OK) {
+        ESP_LOGI(TAG, "OCC1 (charge trip):    %d mA after %d s  [TI default  6000]",
+                 occ.occ1Threshold_mA, occ.occ1Delay_s);
+        ESP_LOGI(TAG, "OCC2 (charge trip):    %d mA after %d s  [TI default  8000]",
+                 occ.occ2Threshold_mA, occ.occ2Delay_s);
+        ESP_LOGI(TAG, "OCD1 (discharge trip): %d mA after %d s  [TI default -6000]",
+                 occ.ocd1Threshold_mA, occ.ocd1Delay_s);
+        ESP_LOGI(TAG, "OCD2 (discharge trip): %d mA after %d s  [TI default -8000]",
+                 occ.ocd2Threshold_mA, occ.ocd2Delay_s);
+        ESP_LOGI(TAG, "NOTE: these TRIP the FETs (current -> 0). They never clamp current "
+                 "to an intermediate value, so they cannot by themselves explain a steady 3 A.");
+    } else {
+        ESP_LOGE(TAG, "getOvercurrentConfig() failed: %s (device Sealed? check SEC field)",
+                 esp_err_to_name(occErr));
+    }
+
+    ChargingCurrentConfig ccc = {};
+    esp_err_t cccErr = gauge.getChargingCurrentConfig(ccc);
+    if (cccErr == ESP_OK) {
+        ESP_LOGI(TAG, "Advanced Charging Algorithm table (feeds ChargingCurrent(), "
+                 "which a smart charger obeys):");
+        ESP_LOGI(TAG, "  Standard Temp Low  -- V range Low/Med/High: %d / %d / %d mA",
+                 ccc.stdTempLow_mA[0], ccc.stdTempLow_mA[1], ccc.stdTempLow_mA[2]);
+        ESP_LOGI(TAG, "  Standard Temp High -- V range Low/Med/High: %d / %d / %d mA",
+                 ccc.stdTempHigh_mA[0], ccc.stdTempHigh_mA[1], ccc.stdTempHigh_mA[2]);
+        ESP_LOGI(TAG, "  Rec Temp           -- V range Low/Med/High: %d / %d / %d mA",
+                 ccc.recTemp_mA[0], ccc.recTemp_mA[1], ccc.recTemp_mA[2]);
+    } else {
+        ESP_LOGE(TAG, "getChargingCurrentConfig() failed: %s", esp_err_to_name(cccErr));
+    }
+    // ---- Chemistry sanity check -------------------------------------------
+    char chem[16] = {0};
+    if (gauge.getDeviceChemistry(chem, sizeof(chem)) == ESP_OK) {
+        ESP_LOGI(TAG, "DeviceChemistry(): \"%s\"  (expect an LFP/LiFePO4 profile)", chem);
+    }
+
+    uint16_t chemId = 0;
+    if (gauge.getChemId(chemId) == ESP_OK) {
+        bool isLfp = ((chemId & 0xFF00) == 0x0400) || ((chemId & 0xF000) == 0x4000);
+        ESP_LOGI(TAG, "ChemID: %04X  (%s)", chemId,
+                 isLfp ? "LiFePO4 family, correct for this pack"
+                       : "NOT an LFP id -- wrong OCV curve and Ra tables for these cells");
+        if (chemId == 0x0100) {
+            ESP_LOGW(TAG, "  0100 is TI's Li-ion (LiCoO2) shipping default.");
+        }
+        if (!isLfp) {
+            ESP_LOGE(TAG, "!!! State of charge cannot be correct: the OCV curve loaded here !!!");
+            ESP_LOGE(TAG, "!!! belongs to a different chemistry. Load an LFP id in BQStudio.   !!!");
+        }
+    }
+
+    CellVoltageLimits lim = {};
+    esp_err_t limErr = gauge.getCellVoltageLimits(lim);
+    if (limErr == ESP_OK) {
+        ESP_LOGI(TAG, "--- Cell voltage limits programmed in this device ---");
+        ESP_LOGI(TAG, "  COV trip (Std Temp Low/High): %d / %d mV   [LFP wants <= ~3800]",
+                 lim.covThresholdStdTempLow_mV, lim.covThresholdStdTempHigh_mV);
+        ESP_LOGI(TAG, "  COV recovery:                 %d mV        [LFP wants ~3500]",
+                 lim.covRecoveryStdTempLow_mV);
+        ESP_LOGI(TAG, "  CUV trip / recovery:          %d / %d mV",
+                 lim.cuvThreshold_mV, lim.cuvRecovery_mV);
+        ESP_LOGI(TAG, "  Charging voltage (Std L/H):   %d / %d mV   [LFP wants ~3650]",
+                 lim.chargingVoltageStdTempLow_mV, lim.chargingVoltageStdTempHigh_mV);
+        ESP_LOGI(TAG, "  Voltage range Low/Med/High:   %d / %d / %d mV",
+                 lim.voltageRangeLow_mV, lim.voltageRangeMed_mV, lim.voltageRangeHigh_mV);
+
+        if (lim.covThresholdStdTempLow_mV > 3900 || lim.chargingVoltageStdTempLow_mV > 3700) {
+            ESP_LOGE(TAG, "!!! DANGER: these are Li-ion voltages on a LiFePO4 pack. !!!");
+            ESP_LOGE(TAG, "!!! Do NOT charge with a charger that obeys ChargingVoltage(). !!!");
+        }
+    } else {
+        ESP_LOGE(TAG, "getCellVoltageLimits() failed: %s", esp_err_to_name(limErr));
+    }
+    ESP_LOGI(TAG, "=== Done reading current limits ===");
+#endif
+
     while (1) {
         uint16_t packMv = 0;
         int16_t  packMa = 0;
         esp_err_t vErr = gauge.getVoltage(packMv);
         esp_err_t iErr = gauge.getCurrent(packMa);
+
+        uint16_t chgCurrentMa = 0, chgVoltageMv = 0;
+        esp_err_t chgIErr = gauge.getChargingCurrent(chgCurrentMa);
+        esp_err_t chgVErr = gauge.getChargingVoltage(chgVoltageMv);
+        if (chgIErr == ESP_OK && chgVErr == ESP_OK) {
+            ESP_LOGI(TAG, "ChargingCurrent() (requested of charger): %u mA, ChargingVoltage(): %u mV",
+                     chgCurrentMa, chgVoltageMv);
+        }
 
         DAStatus1 da1 = {};
         esp_err_t da1Err = gauge.readDAStatus1(da1);
@@ -416,13 +507,15 @@ extern "C" void app_main(void)
             ESP_LOGI(TAG, "BatteryStatus raw: 0x%04X", battStatus);
             ESP_LOGI(TAG, "  OverChargedAlarm:      %d", (battStatus >> 15) & 1);
             ESP_LOGI(TAG, "  TerminateChargeAlarm:  %d", (battStatus >> 14) & 1);
-            ESP_LOGI(TAG, "  TerminateDischargeAlarm: %d", (battStatus >> 12) & 1);
-            ESP_LOGI(TAG, "  RemainingCapacityAlarm: %d", (battStatus >> 11) & 1);
-            ESP_LOGI(TAG, "  RemainingTimeAlarm:    %d", (battStatus >> 10) & 1);
-            ESP_LOGI(TAG, "  Initialized:           %d", (battStatus >> 8) & 1);
-            ESP_LOGI(TAG, "  Discharging:           %d", (battStatus >> 7) & 1);
-            ESP_LOGI(TAG, "  FullyCharged:          %d", (battStatus >> 6) & 1);
-            ESP_LOGI(TAG, "  FullyDischarged:       %d", (battStatus >> 5) & 1);
+            ESP_LOGI(TAG, "  OverTempAlarm:         %d", (battStatus >> 12) & 1);
+            ESP_LOGI(TAG, "  TerminateDischargeAlarm: %d", (battStatus >> 11) & 1);
+            ESP_LOGI(TAG, "  RemainingCapacityAlarm: %d", (battStatus >> 9) & 1);
+            ESP_LOGI(TAG, "  RemainingTimeAlarm:    %d", (battStatus >> 8) & 1);
+            ESP_LOGI(TAG, "  Initialized (INIT):    %d", (battStatus >> 7) & 1);
+            ESP_LOGI(TAG, "  Discharging (DSG):     %d  (0 = gauge thinks it is CHARGING)",
+                     (battStatus >> 6) & 1);
+            ESP_LOGI(TAG, "  FullyCharged (FC):     %d", (battStatus >> 5) & 1);
+            ESP_LOGI(TAG, "  FullyDischarged (FD):  %d", (battStatus >> 4) & 1);
             ESP_LOGI(TAG, "  ErrorCode (bits 0-3):  %d", battStatus & 0x0F);
         } else {
             ESP_LOGE(TAG, "getBatteryStatus() failed: %s", esp_err_to_name(bsErr));

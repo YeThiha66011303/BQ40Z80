@@ -336,6 +336,137 @@ esp_err_t BQ40Z80::getDaConfigurationNR(bool &nr, uint16_t &rawValue) {
     return ESP_OK;
 }
 
+// ---- What the charger is actually being told to do --------------------------
+// ChargingCurrent()/ChargingVoltage() are the values the gauge broadcasts to an
+// SMBus smart charger. A compliant charger will not exceed ChargingCurrent(),
+// so if this reads well below your expected charge rate, THIS is your limit --
+// and it comes from the Advanced Charging Algorithm table, not from OCC.
+esp_err_t BQ40Z80::getChargingCurrent(uint16_t &mA) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::ChargingCurrent), mA);
+}
+
+esp_err_t BQ40Z80::getChargingVoltage(uint16_t &mV) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::ChargingVoltage), mV);
+}
+
+// ---- Data flash: actual configured overcurrent trip thresholds ---------------
+// All addresses confirmed vs TRM SLUUBT5C Table 19-1 (Data Flash Table).
+// Read-only. Requires at least Unsealed access -- if the device is Sealed these
+// will fail or return zeros (check OperationStatus SEC field).
+esp_err_t BQ40Z80::getOvercurrentConfig(OvercurrentConfig &out) {
+    uint8_t buf[2] = {0};
+    esp_err_t err;
+
+    auto readI2 = [&](uint16_t addr, int16_t &dest) -> esp_err_t {
+        esp_err_t e = readDataFlash(addr, buf, 2);
+        if (e == ESP_OK) dest = (int16_t)((uint16_t)buf[0] | ((uint16_t)buf[1] << 8));
+        return e;
+    };
+
+    err = readI2(0x4BE4, out.occ1Threshold_mA);           if (err != ESP_OK) return err;
+    err = readDataFlash(0x4BE6, &out.occ1Delay_s, 1);     if (err != ESP_OK) return err;
+    err = readI2(0x4BE7, out.occ2Threshold_mA);           if (err != ESP_OK) return err;
+    err = readDataFlash(0x4BE9, &out.occ2Delay_s, 1);     if (err != ESP_OK) return err;
+    err = readI2(0x4BED, out.ocd1Threshold_mA);           if (err != ESP_OK) return err;
+    err = readDataFlash(0x4BEF, &out.ocd1Delay_s, 1);     if (err != ESP_OK) return err;
+    err = readI2(0x4BF0, out.ocd2Threshold_mA);           if (err != ESP_OK) return err;
+    err = readDataFlash(0x4BF2, &out.ocd2Delay_s, 1);     if (err != ESP_OK) return err;
+
+    return ESP_OK;
+}
+
+// ---- Data flash: Advanced Charging Algorithm (JEITA) current table -----------
+esp_err_t BQ40Z80::getChargingCurrentConfig(ChargingCurrentConfig &out) {
+    uint8_t buf[2] = {0};
+
+    auto readI2 = [&](uint16_t addr, int16_t &dest) -> esp_err_t {
+        esp_err_t e = readDataFlash(addr, buf, 2);
+        if (e == ESP_OK) dest = (int16_t)((uint16_t)buf[0] | ((uint16_t)buf[1] << 8));
+        return e;
+    };
+
+    // Standard Temp Low / Standard Temp High / Rec Temp, each Low/Med/High voltage range
+    const uint16_t addrs[3][3] = {
+        { 0x4CA9, 0x4CAB, 0x4CAD },
+        { 0x4CB1, 0x4CB3, 0x4CB5 },
+        { 0x4CC1, 0x4CC3, 0x4CC5 },
+    };
+    int16_t *dests[3] = { out.stdTempLow_mA, out.stdTempHigh_mA, out.recTemp_mA };
+
+    for (int range = 0; range < 3; range++) {
+        for (int v = 0; v < 3; v++) {
+            esp_err_t err = readI2(addrs[range][v], dests[range][v]);
+            if (err != ESP_OK) return err;
+        }
+    }
+    return ESP_OK;
+}
+
+// ---- Data flash: cell voltage limits (chemistry sanity check) ----------------
+// Addresses confirmed vs TRM SLUUBT5C Table 19-1. Read-only.
+// Compare these against your ACTUAL cell chemistry. TI's shipping defaults are
+// Li-ion (COV 4300 mV, charge to 4200 mV) and are dangerous on an LFP pack.
+esp_err_t BQ40Z80::getCellVoltageLimits(CellVoltageLimits &out) {
+    uint8_t buf[2] = {0};
+
+    auto readI2 = [&](uint16_t addr, int16_t &dest) -> esp_err_t {
+        esp_err_t e = readDataFlash(addr, buf, 2);
+        if (e == ESP_OK) dest = (int16_t)((uint16_t)buf[0] | ((uint16_t)buf[1] << 8));
+        return e;
+    };
+
+    struct { uint16_t addr; int16_t *dest; } rows[] = {
+        { 0x4BCE, &out.covThresholdStdTempLow_mV     },
+        { 0x4BD0, &out.covThresholdStdTempHigh_mV    },
+        { 0x4BD9, &out.covRecoveryStdTempLow_mV      },
+        { 0x4BC2, &out.cuvThreshold_mV               },
+        { 0x4BC5, &out.cuvRecovery_mV                },
+        { 0x4CA7, &out.chargingVoltageStdTempLow_mV  },
+        { 0x4CAF, &out.chargingVoltageStdTempHigh_mV },
+        { 0x4CCD, &out.voltageRangeLow_mV            },
+        { 0x4CCF, &out.voltageRangeMed_mV            },
+        { 0x4CD1, &out.voltageRangeHigh_mV           },
+    };
+
+    for (auto &r : rows) {
+        esp_err_t err = readI2(r.addr, *r.dest);
+        if (err != ESP_OK) return err;
+    }
+    return ESP_OK;
+}
+
+// ---- Chemistry ID (MAC 0x0006) ----------------------------------------------
+// Confirmed vs TRM SLUUBT5C sec 17: write 06 00 to ManufacturerBlockAccess, read
+// back 2 bytes little endian from ManufacturerData. The chemistry dataset itself
+// (OCV curve + Ra tables) is NOT writable over SMBus -- only BQStudio can load it.
+esp_err_t BQ40Z80::getChemId(uint16_t &chemId) {
+    uint8_t raw[2] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::ChemicalId),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+    if (rawLen < 2) return ESP_ERR_INVALID_SIZE;
+
+    chemId = (uint16_t)raw[0] | ((uint16_t)raw[1] << 8);
+    return ESP_OK;
+}
+
+// ---- DeviceChemistry() -- declared previously but never defined --------------
+esp_err_t BQ40Z80::getDeviceChemistry(char *buf, size_t bufLen) {
+    if (bufLen == 0) return ESP_ERR_INVALID_ARG;
+
+    uint8_t raw[32] = {0};
+    uint8_t rawLen = 0;
+    uint8_t maxLen = (bufLen - 1 > 32) ? 32 : (uint8_t)(bufLen - 1);
+    esp_err_t err = smbusReadBlock(static_cast<uint8_t>(SbsCommand::DeviceChemistry),
+                                    raw, rawLen, maxLen);
+    if (err != ESP_OK) return err;
+
+    memcpy(buf, raw, rawLen);
+    buf[rawLen] = '\0';
+    return ESP_OK;
+}
+
 esp_err_t BQ40Z80::getCounterDecDelayOCD(uint8_t &seconds) {
     return readDataFlash(0x4BF7, &seconds, 1);
 }
