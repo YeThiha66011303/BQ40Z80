@@ -335,8 +335,18 @@ struct CellVoltageLimits {
     int16_t covRecoveryStdTempLow_mV;       // 0x4BD9, TI default 3900 (Li-ion)
     int16_t cuvThreshold_mV;                // 0x4BC2, TI default 2500
     int16_t cuvRecovery_mV;                 // 0x4BC5, TI default 3000
+    // Charging voltage is PER TEMPERATURE RANGE. ChargingVoltage() reports whichever
+    // row matches the current Temp Range, so reading only the Standard Temp rows is
+    // misleading: at room temperature the gauge is usually in Rec Temp (0x4CBF),
+    // whose 4100 mV default x 6 cells is where a reported 24600 mV comes from.
+    int16_t chargingVoltageLowTemp_mV;      // 0x4C9F, TI default 4000 (Li-ion)
     int16_t chargingVoltageStdTempLow_mV;   // 0x4CA7, TI default 4200 (Li-ion)
     int16_t chargingVoltageStdTempHigh_mV;  // 0x4CAF, TI default 4200 (Li-ion)
+    int16_t chargingVoltageHighTemp_mV;     // 0x4CB7, TI default 4000 (Li-ion)
+    int16_t chargingVoltageRecTemp_mV;      // 0x4CBF, TI default 4100 (Li-ion)
+    int16_t prechargeCurrent_mA;            // 0x4CC7, TI default 88 -- if ChargingCurrent()
+                                             // reports 88 mA, the gauge is in PRECHARGE mode
+    int16_t prechargeStartVoltage_mV;       // 0x4CCB, TI default 2500
     int16_t voltageRangeLow_mV;             // 0x4CCD, TI default 2900
     int16_t voltageRangeMed_mV;             // 0x4CCF, TI default 3600
     int16_t voltageRangeHigh_mV;            // 0x4CD1, TI default 4000

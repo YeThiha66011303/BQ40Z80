@@ -309,8 +309,15 @@ extern "C" void app_main(void)
                  lim.covRecoveryStdTempLow_mV);
         ESP_LOGI(TAG, "  CUV trip / recovery:          %d / %d mV",
                  lim.cuvThreshold_mV, lim.cuvRecovery_mV);
-        ESP_LOGI(TAG, "  Charging voltage (Std L/H):   %d / %d mV   [LFP wants ~3650]",
-                 lim.chargingVoltageStdTempLow_mV, lim.chargingVoltageStdTempHigh_mV);
+        ESP_LOGI(TAG, "  Charging voltage per temp range  [LFP wants ~3650 on all]:");
+        ESP_LOGI(TAG, "    LowTemp %d | StdLow %d | StdHigh %d | HighTemp %d | RecTemp %d mV",
+                 lim.chargingVoltageLowTemp_mV, lim.chargingVoltageStdTempLow_mV,
+                 lim.chargingVoltageStdTempHigh_mV, lim.chargingVoltageHighTemp_mV,
+                 lim.chargingVoltageRecTemp_mV);
+        ESP_LOGI(TAG, "    (ChargingVoltage() reports whichever row matches Temp Range,");
+        ESP_LOGI(TAG, "     x %d cells. At room temp that is normally the RecTemp row.)", 6);
+        ESP_LOGI(TAG, "  Precharge current / start V:  %d mA / %d mV",
+                 lim.prechargeCurrent_mA, lim.prechargeStartVoltage_mV);
         ESP_LOGI(TAG, "  Voltage range Low/Med/High:   %d / %d / %d mV",
                  lim.voltageRangeLow_mV, lim.voltageRangeMed_mV, lim.voltageRangeHigh_mV);
 
