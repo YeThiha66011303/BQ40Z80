@@ -4,7 +4,6 @@
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"
   ],
-  "idf.portWin": "COM5",
   "idf.currentSetup": "C:\\esp\\v6.0.2\\esp-idf",
   "idf.customExtraVars": {
     "IDF_TARGET": "esp32s3"
@@ -15,5 +14,6 @@
     "--query-driver=**",
     "--compile-commands-dir=c:\\Users\\yethi\\BQ40Z80\\build"
   ],
-  "idf.flashType": "JTAG"
+  "idf.flashType": "JTAG",
+  "idf.port": "COM5"
 }

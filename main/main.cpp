@@ -389,7 +389,7 @@ extern "C" void app_main(void)
 
             if (manualModeActive) {
                 ManufacturingStatus mfgNow = {};
-                OperationStatus op = {}; // still read for comparison/telemetry
+                OperationStatus op = {}; 
                 if (gauge.getManufacturingStatus(mfgNow) == ESP_OK && gauge.getOperationStatus(op) == ESP_OK) {
                     ESP_LOGI(TAG, "[Check] ManufacturingStatus chgEn=%d dsgEn=%d  vs  OperationStatus CHG=%d DSG=%d",
                              mfgNow.chgEn, mfgNow.dsgEn, op.chg, op.dsg);

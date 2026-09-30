@@ -336,11 +336,7 @@ esp_err_t BQ40Z80::getDaConfigurationNR(bool &nr, uint16_t &rawValue) {
     return ESP_OK;
 }
 
-// ---- What the charger is actually being told to do --------------------------
-// ChargingCurrent()/ChargingVoltage() are the values the gauge broadcasts to an
-// SMBus smart charger. A compliant charger will not exceed ChargingCurrent(),
-// so if this reads well below your expected charge rate, THIS is your limit --
-// and it comes from the Advanced Charging Algorithm table, not from OCC.
+
 esp_err_t BQ40Z80::getChargingCurrent(uint16_t &mA) {
     return smbusReadWord(static_cast<uint8_t>(SbsCommand::ChargingCurrent), mA);
 }
@@ -349,10 +345,7 @@ esp_err_t BQ40Z80::getChargingVoltage(uint16_t &mV) {
     return smbusReadWord(static_cast<uint8_t>(SbsCommand::ChargingVoltage), mV);
 }
 
-// ---- Data flash: actual configured overcurrent trip thresholds ---------------
-// All addresses confirmed vs TRM SLUUBT5C Table 19-1 (Data Flash Table).
-// Read-only. Requires at least Unsealed access -- if the device is Sealed these
-// will fail or return zeros (check OperationStatus SEC field).
+
 esp_err_t BQ40Z80::getOvercurrentConfig(OvercurrentConfig &out) {
     uint8_t buf[2] = {0};
     esp_err_t err;
@@ -403,9 +396,7 @@ esp_err_t BQ40Z80::getChargingCurrentConfig(ChargingCurrentConfig &out) {
 }
 
 // ---- Data flash: cell voltage limits (chemistry sanity check) ----------------
-// Addresses confirmed vs TRM SLUUBT5C Table 19-1. Read-only.
-// Compare these against your ACTUAL cell chemistry. TI's shipping defaults are
-// Li-ion (COV 4300 mV, charge to 4200 mV) and are dangerous on an LFP pack.
+
 esp_err_t BQ40Z80::getCellVoltageLimits(CellVoltageLimits &out) {
     uint8_t buf[2] = {0};
 
@@ -441,9 +432,6 @@ esp_err_t BQ40Z80::getCellVoltageLimits(CellVoltageLimits &out) {
 }
 
 // ---- Chemistry ID (MAC 0x0006) ----------------------------------------------
-// Confirmed vs TRM SLUUBT5C sec 17: write 06 00 to ManufacturerBlockAccess, read
-// back 2 bytes little endian from ManufacturerData. The chemistry dataset itself
-// (OCV curve + Ra tables) is NOT writable over SMBus -- only BQStudio can load it.
 esp_err_t BQ40Z80::getChemId(uint16_t &chemId) {
     uint8_t raw[2] = {0};
     uint8_t rawLen = 0;
