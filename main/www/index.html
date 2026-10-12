@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BQ40Z80 Monitor</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212a; --line:#2a2f3a;
+    --text:#e6e9ef; --dim:#8b93a4; --accent:#4da3ff;
+    --hi:#c0392b; --lo:#1e7e46; --rsvd:#3a3f4b;
+    --warn:#d98c1f; --ok:#1e7e46; --bad:#c0392b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:14px/1.45 "Segoe UI",system-ui,-apple-system,sans-serif}
+  header{position:sticky;top:0;z-index:10;background:var(--panel);
+         border-bottom:1px solid var(--line);padding:10px 16px}
+  .top{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.3px}
+  .pill{font-size:12px;padding:3px 10px;border-radius:999px;font-weight:600}
+  .pill.on{background:rgba(30,126,70,.2);color:#4ade80;border:1px solid #1e7e46}
+  .pill.off{background:rgba(192,57,43,.2);color:#f87171;border:1px solid #c0392b}
+  .meta{margin-left:auto;color:var(--dim);font-size:12px}
+
+  .cards{display:grid;gap:10px;padding:12px 16px;
+         grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
+  .card{background:var(--panel);border:1px solid var(--line);
+        border-radius:8px;padding:10px 12px}
+  .card .k{color:var(--dim);font-size:11px;text-transform:uppercase;
+           letter-spacing:.6px}
+  .card .v{font-size:21px;font-weight:600;margin-top:3px;
+           font-variant-numeric:tabular-nums}
+  .card .u{font-size:12px;color:var(--dim);font-weight:400;margin-left:3px}
+
+  nav{display:flex;gap:4px;padding:0 16px;flex-wrap:wrap;
+      border-bottom:1px solid var(--line)}
+  nav button{background:none;border:none;color:var(--dim);cursor:pointer;
+             padding:9px 14px;font-size:13px;font-weight:500;
+             border-bottom:2px solid transparent}
+  nav button:hover{color:var(--text)}
+  nav button.sel{color:var(--accent);border-bottom-color:var(--accent)}
+
+  main{padding:14px 16px 40px}
+  .panel{display:none}
+  .panel.sel{display:block}
+
+  .grid{display:grid;gap:12px;
+        grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}
+  .box{background:var(--panel);border:1px solid var(--line);
+       border-radius:8px;overflow:hidden}
+  .box h2{font-size:12px;margin:0;padding:8px 12px;color:var(--dim);
+          background:var(--panel2);border-bottom:1px solid var(--line);
+          text-transform:uppercase;letter-spacing:.7px;font-weight:600}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  td,th{padding:4px 10px;border-bottom:1px solid var(--line);text-align:left}
+  tr:last-child td{border-bottom:none}
+  td.n{color:var(--dim)}
+  td.v{text-align:right;font-variant-numeric:tabular-nums;font-weight:500;
+       white-space:nowrap}
+  td.u{color:var(--dim);width:54px;font-size:12px}
+
+  /* Bit registers take the full page width, one group per row. Eight columns
+     then fit outright, so no group needs a scrollbar of its own. */
+  .stack{display:flex;flex-direction:column;gap:12px}
+  .bits table{font-size:12px;width:100%;table-layout:fixed}
+  .bits td,.bits th{padding:4px 5px;text-align:center;border:1px solid var(--bg);
+                    overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  /* Narrower than this, eight columns genuinely will not fit. Fall back to one
+     scroller for the whole panel so every group stays in step, instead of
+     eighteen that each snap back to the start. */
+  @media(max-width:820px){
+    #p-bits{overflow-x:auto}
+    .stack{min-width:730px}
+  }
+  .bits td.nm{text-align:left;color:var(--text);white-space:nowrap;
+              background:var(--panel2);font-size:12px}
+  .bits td.hx{text-align:right;font-family:ui-monospace,Consolas,monospace;
+              background:var(--panel2);color:var(--dim)}
+  .bits th{background:var(--panel2);color:var(--dim);font-weight:600}
+  .b1{background:var(--hi);color:#fff;font-weight:600}
+  .b0{background:var(--lo);color:#cfe9d8}
+  .br{background:var(--rsvd);color:#6b7280}
+
+  .note{color:var(--dim);font-size:12px;margin:10px 2px}
+  .bad{color:#f87171;font-weight:600}
+  .pad{padding:10px 12px}
+  button.danger{background:var(--bad);color:#fff;border:none;border-radius:6px;
+                padding:9px 16px;font-size:13px;font-weight:600;cursor:pointer}
+  button.danger:hover{filter:brightness(1.15)}
+  .okv{color:#4ade80;font-weight:600}
+  .warnv{color:#fbbf24;font-weight:600}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="top">
+    <h1>BQ40Z80 Monitor</h1>
+    <span id="link" class="pill off">connecting</span>
+    <span id="gauge" class="pill off">gauge</span>
+    <span class="meta" id="meta">&mdash;</span>
+  </div>
+</header>
+
+<div class="cards" id="cards"></div>
+
+<nav>
+  <button class="sel" data-p="reg">Registers</button>
+  <button data-p="bits">Bit Registers</button>
+  <button data-p="it">Impedance Track</button>
+  <button data-p="life">Lifetime</button>
+</nav>
+
+<main>
+  <div class="panel sel" id="p-reg"></div>
+  <div class="panel" id="p-bits"></div>
+  <div class="panel" id="p-it"></div>
+  <div class="panel" id="p-life"></div>
+</main>
+
+<script>
+"use strict";
+
+// --- bit name tables -------------------------------------------------------
+// Each entry lists bit 15..0 (or 7..0) left to right, exactly as BQStudio
+// draws them. Names come from TRM SLUUBT5C section 18.
+const RSVD = "RSVD";
+
+const BITS = {
+  batteryMode: { w:16, rows:[
+    ["Battery Mode (high)", ["CAPM","CHGM","AM",RSVD,RSVD,RSVD,"PB","CC"]],
+    ["Battery Mode (low)",  ["CF",RSVD,RSVD,RSVD,RSVD,RSVD,"PBS","ICC"]]]},
+
+  batteryStatus: { w:16, rows:[
+    ["Battery Status (high)",["OCA","TCA",RSVD,"OTA","TDA",RSVD,"RCA","RTA"]],
+    ["Battery Status (low)", ["INIT","DSG","FC","FD","EC3","EC2","EC1","EC0"]]]},
+
+  opA: { w:16, rows:[
+    ["Operation Status A (high)",["SLEEP","XCHG","XDSG","PF","SS","SDV","SEC1","SEC0"]],
+    ["Operation Status A (low)", ["BTP_INT",RSVD,"FUSE","PDSG","PCHG","CHG","DSG","PRES"]]]},
+
+  opB: { w:16, rows:[
+    ["Operation Status B (high)",["IATA_CTERM","PSSHUT","EMSHUT","CB","SLPCC","SLPAD","SMBLCAL","INIT"]],
+    ["Operation Status B (low)", ["SLEEPM","XL","CAL_OFFSET","CAL","AUTOCALM","AUTH","LED","SDM"]]]},
+
+  tempRange: { w:8, rows:[
+    ["Temp Range",[RSVD,"OT","HT","STH","RT","STL","LT","UT"]]]},
+
+  chargingStatus: { w:16, rows:[
+    ["Charging Status (high)",[RSVD,RSVD,RSVD,RSVD,"NCT","CCC","CVR","CCR"]],
+    ["Charging Status (low)", ["VCT","MCHG","SU","IN","HV","MV","LV","PV"]]]},
+
+  gauging: { w:8, rows:[
+    ["Gauging Status",["CF","DSG","EDV","BAL_EN","TC","TD","FC","FD"]]]},
+
+  itStatus: { w:16, rows:[
+    ["IT Status (high)",[RSVD,RSVD,RSVD,"OCVFR","LDMD","RX","QMAX","VDQ"]],
+    ["IT Status (low)", ["NSFM",RSVD,"SLPQMAX","QEN","VOK","RDIS",RSVD,"REST"]]]},
+
+  mfgStatus: { w:16, rows:[
+    ["Manufacturing Status (high)",["CAL_EN","LT_TEST","PDSG_TEST",RSVD,RSVD,RSVD,"LED_EN","FUSE_EN"]],
+    ["Manufacturing Status (low)", ["BBR_EN","PF_EN","LF_EN","FET_EN","GAUGE_EN","DSG_TEST","CHG_TEST","PCHG_TEST"]]]},
+
+  safetyAB: { w:16, rows:[
+    ["(high)",[RSVD,"CUVC","OTD","OTC","ASCDL","ASCD","ASCCL","ASCC"]],
+    ["(low)", ["AOLDL","AOLD","OCD2","OCD1","OCC2","OCC1","COV","CUV"]]]},
+
+  safetyCD: { w:16, rows:[
+    ["(high)",[RSVD,RSVD,"OCDL","COVL","UTD","UTC","PCHGC","CHGV"]],
+    ["(low)", ["CHGC","OC",RSVD,"CTO",RSVD,"PTO","HWDF","OTF"]]]},
+
+  pfAB: { w:16, rows:[
+    ["(high)",["ASCDL","ASCCL","AOLDL","VIMA","VIMR","CD","IMP","CB"]],
+    ["(low)", ["QIM","SOTF","COVL","SOT","SOCD","SOCC","SOV","SUV"]]]},
+
+  pfCD: { w:16, rows:[
+    ["(high)",["TS4","TS3","TS2","TS1",RSVD,"DFW",RSVD,"IFC"]],
+    ["(low)", [RSVD,"2LVL","AFEC","AFER","FUSE","OCDL","DFETF","CFETF"]]]},
+
+  lStatus: { w:8, rows:[
+    ["LStatus",[RSVD,RSVD,RSVD,RSVD,"FIELD_QMAX","ITEN","CF1","CF0"]]]}
+};
+
+// --- helpers ---------------------------------------------------------------
+const $ = id => document.getElementById(id);
+const hex = (v,d) => "0x" + (v>>>0).toString(16).toUpperCase().padStart(d,"0");
+
+// Raw 0.1 K to degrees C. An unconnected thermistor reads 0, which lands at
+// -273.2 -- the same thing BQStudio shows for TS3 and TS4 on this pack.
+const degC = dK => (dK/10 - 273.15).toFixed(1);
+
+function rows(list){
+  let h = "<table>";
+  for (const [n,v,u] of list){
+    h += `<tr><td class="n">${n}</td><td class="v">${v}</td>` +
+         `<td class="u">${u||""}</td></tr>`;
+  }
+  return h + "</table>";
+}
+const box = (title, body) => `<div class="box"><h2>${title}</h2>${body}</div>`;
+
+// Draws one BQStudio-style bit table: name, hex value, then bit N..0.
+function bitTable(title, spec, value){
+  let h = `<div class="box"><h2>${title}</h2><div class="bits"><table>`;
+  // Fixed columns: the row label and the hex value take what they need, the
+  // eight bit cells split the rest evenly so they line up across every group.
+  h += '<colgroup><col style="width:215px"><col style="width:90px">' +
+       '<col span="8"></colgroup>';
+  h += "<tr><th></th><th></th>";
+  for (let i = 7; i >= 0; i--) h += `<th>Bit${i}</th>`;
+  h += "</tr>";
+
+  spec.rows.forEach((row, ri) => {
+    const [label, names] = row;
+    // With two rows the first is the high byte; with one row there is only a
+    // low byte. Shift so bit 7 of the drawn row is the right source bit.
+    const shift = (spec.rows.length === 2 && ri === 0) ? 8 : 0;
+    h += `<tr><td class="nm">${label}</td>`;
+    h += ri === 0
+       ? `<td class="hx" rowspan="${spec.rows.length}">` +
+         `${hex(value, spec.w/4)}</td>` : "";
+    for (let b = 7; b >= 0; b--){
+      const nm = names[7-b];
+      if (nm === RSVD){ h += `<td class="br">${RSVD}</td>`; continue; }
+      const on = (value >>> (b + shift)) & 1;
+      h += `<td class="${on ? "b1" : "b0"}">${nm}</td>`;
+    }
+    h += "</tr>";
+  });
+  return h + "</table></div></div>";
+}
+
+// Per-cell table: one row per cell, one column per series.
+function cellTable(title, cols, n){
+  let h = `<div class="box"><h2>${title}</h2><table><tr><th>Cell</th>`;
+  for (const c of cols) h += `<th style="text-align:right">${c[0]}</th>`;
+  h += "</tr>";
+  for (let i = 0; i < n; i++){
+    h += `<tr><td class="n">${i+1}</td>`;
+    for (const c of cols) h += `<td class="v">${c[1][i]}</td>`;
+    h += "</tr>";
+  }
+  return h + "</table></div>";
+}
+
+// --- rendering -------------------------------------------------------------
+function renderCards(d){
+  const s = d.sbs, c = d.cells;
+  const spread = (() => {
+    const live = c.v.slice(0,7).filter(v => v > 500);
+    return live.length ? Math.max(...live) - Math.min(...live) : 0;
+  })();
+  const card = (k,v,u) =>
+    `<div class="card"><div class="k">${k}</div>` +
+    `<div class="v">${v}<span class="u">${u||""}</span></div></div>`;
+
+  $("cards").innerHTML =
+    card("Voltage", (s.voltage/1000).toFixed(2), "V") +
+    card("Current", s.current, "mA") +
+    card("Charge",  s.rsoc, "%") +
+    card("Remaining", s.remCap, "mAh") +
+    card("Full Charge", s.fcc, "mAh") +
+    card("Temperature", degC(s.temp), "°C") +
+    card("Cell Spread", spread, "mV") +
+    card("Cycles", s.cycleCount, "");
+}
+
+function renderRegisters(d){
+  const s = d.sbs, c = d.cells, t = d.temps, st = d.static;
+  let h = '<div class="grid">';
+
+  h += box("Pack", rows([
+    ["Voltage", s.voltage, "mV"],
+    ["BAT pin voltage", c.bat, "mV"],
+    ["PACK pin voltage", c.pack, "mV"],
+    ["Current", s.current, "mA"],
+    ["Average Current", s.avgCurrent, "mA"],
+    ["Temperature", degC(s.temp), "°C"],
+    ["Relative State of Charge", s.rsoc, "%"],
+    ["Absolute State of Charge", s.asoc, "%"],
+    ["Remaining Capacity", s.remCap, "mAh"],
+    ["Full Charge Capacity", s.fcc, "mAh"],
+    ["Design Capacity", st.designCap, "mAh"],
+    ["State of Health", s.soh, "%"],
+    ["Max Error", s.maxError, "%"],
+    ["Cycle Count", s.cycleCount, ""],
+    ["Charging Current", s.chgCurrent, "mA"],
+    ["Charging Voltage", s.chgVoltage, "mV"],
+    ["No Load Rem Cap", s.noLoadRemCap, "mAh"]
+  ]));
+
+  h += cellTable("Per Cell", [
+    ["Voltage (mV)", c.v],
+    ["Current (mA)", c.i],
+    ["Power (cW)",   c.p]
+  ], 7);
+
+  h += box("Temperatures", rows([
+    ["Int Temperature", degC(t.int), "°C"],
+    ["TS1 Temperature", degC(t.ts1), "°C"],
+    ["TS2 Temperature", degC(t.ts2), "°C"],
+    ["TS3 Temperature", degC(t.ts3), "°C"],
+    ["TS4 Temperature", degC(t.ts4), "°C"],
+    ["Cell Temperature", degC(t.cell), "°C"],
+    ["FET Temperature", degC(t.fet), "°C"]
+  ]));
+
+  h += box("Time &amp; Alarms", rows([
+    ["Run Time To Empty", s.rtte, "min"],
+    ["Average Time to Empty", s.atte, "min"],
+    ["Average Time to Full", s.attf, "min"],
+    ["Remaining Cap. Alarm", s.remCapAlarm, "mAh"],
+    ["Remaining Time Alarm", s.remTimeAlarm, "min"],
+    ["At Rate", s.atRate, "mA"],
+    ["At Rate Time To Full", s.atRateTTF, "min"],
+    ["At Rate Time To Empty", s.atRateTTE, "min"],
+    ["At Rate OK", s.atRateOK, ""]
+  ]));
+
+  h += box("Power", rows([
+    ["All Cell Power", c.allCellPower, "cW"],
+    ["Average Power", c.avgPower, "cW"],
+    ["Maximum Turbo Power", s.maxTurboPwr, "cW"],
+    ["Sustained Turbo Power", s.susTurboPwr, "cW"],
+    ["Maximum Turbo Current", s.maxTurboCurr, "mA"],
+    ["Sustained Turbo Current", s.susTurboCurr, "mA"],
+    ["Turbo Pack Resistance", s.turboPackR, "mOhm"],
+    ["Turbo Sys Resistance", s.turboSysR, "mOhm"],
+    ["Turbo EDV", s.turboEdv, "mV"]
+  ]));
+
+  const d16 = st.mfgDate;
+  const date = d16 ? `${1980 + (d16 >> 9)}-` +
+    String((d16 >> 5) & 0xF).padStart(2,"0") + "-" +
+    String(d16 & 0x1F).padStart(2,"0") : "—";
+  // ManufacturingStatus() lives in RAM; Mfg Status Init in data flash is what
+  // it gets reloaded from on a reset or a seal (TRM 16.1). When they disagree,
+  // the flash copy is the one that survives, so a reset can silently drop
+  // FET_EN and leave the pack unable to charge or discharge.
+  let resetVerdict = "—";
+  if (st.mfgInitValid){
+    const initFet   = (st.mfgInit >> 4) & 1;
+    const initGauge = (st.mfgInit >> 3) & 1;
+    if (!initFet)
+      resetVerdict = '<span class="bad">NO &mdash; FET_EN clear in flash</span>';
+    else if (!initGauge)
+      resetVerdict = '<span class="warnv">FET_EN ok, GAUGE_EN clear</span>';
+    else
+      resetVerdict = '<span class="okv">yes</span>';
+  }
+
+  h += box("Device", rows([
+    ["Manufacturer", st.mfg || "—", ""],
+    ["Device Name", st.dev || "—", ""],
+    ["Chemistry", st.chem || "—", ""],
+    ["ChemID", hex(st.chemId,4), ""],
+    ["Device Type", hex(st.devType,4), ""],
+    ["Serial Number", st.serial, ""],
+    ["Design Voltage", st.designV, "mV"],
+    ["Manufacture Date", date, ""],
+    ["Enabled Protections C", st.protCValid ? hex(st.protC,2) : "—", ""],
+    ["Mfg Status Init (0x4800)",
+       st.mfgInitValid ? hex(st.mfgInit,4) : "—", ""],
+    ["Manufacturing Status (live)", hex(d.bits.mfgStatus,4), ""],
+    ["Safe to reset?", resetVerdict, ""]
+  ]));
+
+  const rs = d.reset;
+  const warn = rs.safe
+    ? "Reboots the gauge, clears the latched safety flags and increments the " +
+      "lifetime reset counter. Mfg Status Init has FET_EN set, so firmware " +
+      "FET control survives the reset."
+    : '<span class="bad">Mfg Status Init does not have FET_EN set.</span> ' +
+      "A reset will stop the firmware driving the CHG, DSG and PCHG FETs, and " +
+      "the pack will not charge or discharge until it is restored in BQStudio.";
+  const last = rs.tried
+    ? '<p class="note">Last attempt: ' +
+      (rs.lastErr === 0 ? "sent" : "failed (code " + rs.lastErr + ")") +
+      " at " + rs.lastAt + "s uptime · " + rs.count +
+      " issued this session.</p>"
+    : "";
+  h += box("Maintenance",
+    '<div class="pad"><button class="danger" onclick="doReset()">' +
+    (rs.safe ? "Reset gauge" : "Reset gauge (unsafe)") + "</button>" +
+    '<p class="note" style="margin:9px 0 0">' + warn + "</p>" + last + "</div>");
+
+  return h + "</div>";
+}
+
+// The only call in this page that changes anything on the gauge; everything
+// else is a GET. Kept deliberately awkward: a confirm always, plus a typed
+// word when the flash verdict says a reset would cost FET control.
+let resetSafe = true;
+
+async function doReset(){
+  const safe = resetSafe;
+  let msg = "Reset the BQ40Z80?\n\nThe gauge reboots, latched safety flags " +
+            "clear, and the lifetime reset counter increments.";
+  if (!safe){
+    msg = "WARNING\n\nMfg Status Init (data flash 0x4800) does not have " +
+          "FET_EN set.\n\nAfter this reset the firmware stops driving the " +
+          "CHG, DSG and PCHG FETs. The pack will not charge or discharge " +
+          "until you restore FET_EN in BQStudio.\n\n" + msg;
+  }
+  if (!confirm(msg)) return;
+  if (!safe && prompt("Type RESET to confirm") !== "RESET") return;
+
+  try {
+    const r = await fetch("/api/reset", {
+      method: "POST",
+      body: safe ? "CONFIRM" : "CONFIRM-UNSAFE"
+    });
+    const j = await r.json();
+    alert(j.ok ? "Reset sent. The gauge will be unresponsive for a moment."
+               : "Reset refused: " + (j.error || r.status));
+  } catch (e) {
+    alert("The request never reached the ESP32: " + e);
+  }
+}
+
+function renderBits(d){
+  const b = d.bits;
+  // Gauging Status packs IT Status in bits 23-8 and Gauging Status in 7-0,
+  // which is how BQStudio splits them into two registers.
+  const it = (b.gauging >>> 8) & 0xFFFF;
+  const gs = b.gauging & 0xFF;
+  // Charging Status packs the temperature range in its low byte.
+  const cs = (b.chargingStatus >>> 8) & 0xFFFF;
+  const tr = b.chargingStatus & 0xFF;
+
+  let h = '<div class="stack">';
+  h += bitTable("Battery Mode",   BITS.batteryMode,   b.batteryMode);
+  h += bitTable("Battery Status", BITS.batteryStatus, b.batteryStatus);
+  h += bitTable("Operation Status A", BITS.opA, b.op & 0xFFFF);
+  h += bitTable("Operation Status B", BITS.opB, (b.op >>> 16) & 0xFFFF);
+  h += bitTable("Temp Range",      BITS.tempRange,      tr);
+  h += bitTable("Charging Status", BITS.chargingStatus, cs);
+  h += bitTable("Gauging Status",  BITS.gauging,        gs);
+  h += bitTable("IT Status",       BITS.itStatus,       it);
+  h += bitTable("Manufacturing Status", BITS.mfgStatus, b.mfgStatus);
+  h += bitTable("Safety Alert A+B",  BITS.safetyAB, b.safetyAlert  & 0xFFFF);
+  h += bitTable("Safety Status A+B", BITS.safetyAB, b.safetyStatus & 0xFFFF);
+  h += bitTable("Safety Alert C+D",  BITS.safetyCD, (b.safetyAlert  >>> 16) & 0xFFFF);
+  h += bitTable("Safety Status C+D", BITS.safetyCD, (b.safetyStatus >>> 16) & 0xFFFF);
+  h += bitTable("PF Alert A+B",  BITS.pfAB, b.pfAlert  & 0xFFFF);
+  h += bitTable("PF Status A+B", BITS.pfAB, b.pfStatus & 0xFFFF);
+  h += bitTable("PF Alert C+D",  BITS.pfCD, (b.pfAlert  >>> 16) & 0xFFFF);
+  h += bitTable("PF Status C+D", BITS.pfCD, (b.pfStatus >>> 16) & 0xFFFF);
+  h += bitTable("LStatus", BITS.lStatus, b.lStatus);
+  h += "</div>";
+  h += '<p class="note">Red = bit set. The PF Status and PF Alert bit names ' +
+       'are drawn from BQStudio and have not been re-verified against the TRM.</p>';
+  return h;
+}
+
+function renderIT(d){
+  const i = d.it, f = d.filt, c = d.cb;
+  let h = '<div class="grid">';
+
+  h += cellTable("Impedance Track, per cell", [
+    ["QMax (mAh)", i.qmax],
+    ["QMax DOD0",  i.qmaxDod0],
+    ["Raw DOD0",   i.rawDod0],
+    ["DOD0",       i.dod0],
+    ["DODEOC",     i.dodEoc],
+    ["RaScale",    i.raScale],
+    ["CompRes",    i.compRes],
+    ["Grid",       i.cellGrid]
+  ], 7);
+
+  h += box("Gauging", rows([
+    ["Pack Grid", i.packGrid, ""],
+    ["State Time", i.stateTime, "s"],
+    ["DOD0 Passed Q", i.dod0PassedQ, "mAh"],
+    ["DOD0 Passed E", i.dod0PassedE, "cWh"],
+    ["DOD0 Time", i.dod0Time, "h/16"],
+    ["QMax Passed Q", i.qmaxPassedQ, "mAh"],
+    ["QMax Time", i.qmaxTime, "h/16"],
+    ["Temp k", i.tempK, ""],
+    ["Temp a", i.tempA, ""],
+    ["T_sim", degC(i.tSim), "°C"],
+    ["T_ambient", degC(i.tAmbient), "°C"]
+  ]));
+
+  h += box("True &amp; Filtered Capacity", rows([
+    ["True Rem Q", i.trueRemQ, "mAh"],
+    ["True Rem E", i.trueRemE, "cWh"],
+    ["Initial Q", i.initialQ, "mAh"],
+    ["Initial E", i.initialE, "cWh"],
+    ["True Full Chg Q", i.trueFccQ, "mAh"],
+    ["True Full Chg E", i.trueFccE, "cWh"],
+    ["Flt Rem Q", f.remQ, "mAh"],
+    ["Flt Rem E", f.remE, "cWh"],
+    ["Flt Full Chg Q", f.fccQ, "mAh"],
+    ["Flt Full Chg E", f.fccE, "cWh"]
+  ]));
+
+  h += cellTable("Cell Balancing", [
+    ["Bal Time (s)", c.time],
+    ["Bal DOD",      c.dod]
+  ], 7);
+
+  h += box("Health", rows([
+    ["SoH FCC Q", d.sbs.sohFccQ, "mAh"],
+    ["SoH FCC E", d.sbs.sohFccE, "cWh"],
+    ["Total DOD Chg", c.totalDodChg, ""]
+  ]));
+
+  return h + "</div>";
+}
+
+function renderLife(d){
+  const l = d.lt;
+  let h = '<div class="grid">';
+
+  h += cellTable("Lifetime cell records", [
+    ["Max V (mV)", l.cellMaxV],
+    ["Min V (mV)", l.cellMinV],
+    ["Bal Time (h)", l.cbTime]
+  ], 7);
+
+  h += box("Lifetime extremes", rows([
+    ["Max Delta Cell Voltage", l.maxDeltaV, "mV"],
+    ["Max Charge Current", l.maxChgCurr, "mA"],
+    ["Max Discharge Current", l.maxDsgCurr, "mA"],
+    ["Max Avg Dsg Current", l.maxAvgDsgCurr, "mA"],
+    ["Max Avg Dsg Power", l.maxAvgDsgPwr, "cW"],
+    ["Max Temp Cell", l.maxTempCell, "°C"],
+    ["Min Temp Cell", l.minTempCell, "°C"],
+    ["Max Delta Temp", l.maxDeltaTemp, "°C"],
+    ["Max Temp Int Sensor", l.maxTempInt, "°C"],
+    ["Min Temp Int Sensor", l.minTempInt, "°C"],
+    ["Max Temp FET", l.maxTempFet, "°C"]
+  ]));
+
+  h += box("Counters", rows([
+    ["Shutdowns", l.shutdowns, ""],
+    ["Partial Resets", l.partialResets, ""],
+    ["Full Resets", l.fullResets, ""],
+    ["Watchdog Resets", l.wdtResets, ""],
+    ["Total FW Runtime", l.fwRuntime, "h"]
+  ]));
+
+  h += box("Time in temperature range", rows([
+    ["Under Temp (UT)", l.tUT, "h"],
+    ["Low Temp (LT)", l.tLT, "h"],
+    ["Std Temp Low (STL)", l.tSTL, "h"],
+    ["Rec Temp (RT)", l.tRT, "h"],
+    ["Std Temp High (STH)", l.tSTH, "h"],
+    ["High Temp (HT)", l.tHT, "h"],
+    ["Over Temp (OT)", l.tOT, "h"]
+  ]));
+
+  return h + "</div>";
+}
+
+// --- polling ---------------------------------------------------------------
+let failures = 0;
+
+async function tick(){
+  try {
+    const r = await fetch("/api/data", {cache:"no-store"});
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const d = await r.json();
+    failures = 0;
+
+    $("link").className  = "pill on";
+    $("link").textContent = "connected";
+    $("gauge").className = d.online ? "pill on" : "pill off";
+    $("gauge").textContent = d.online ? "gauge online" : "gauge not responding";
+
+    const hh = Math.floor(d.uptime/3600),
+          mm = Math.floor(d.uptime%3600/60),
+          ss = d.uptime%60;
+    $("meta").textContent =
+      `up ${hh}h ${String(mm).padStart(2,"0")}m ${String(ss).padStart(2,"0")}s` +
+      ` · ${d.polls} polls · ${d.errors} read errors`;
+
+    resetSafe = d.reset.safe;
+    renderCards(d);
+    $("p-reg").innerHTML  = renderRegisters(d);
+    $("p-bits").innerHTML = renderBits(d);
+    $("p-it").innerHTML   = renderIT(d);
+    $("p-life").innerHTML = renderLife(d);
+  } catch (e) {
+    if (++failures > 2){
+      $("link").className = "pill off";
+      $("link").textContent = "no link to ESP32";
+    }
+  }
+}
+
+document.querySelectorAll("nav button").forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll("nav button").forEach(x => x.classList.remove("sel"));
+    document.querySelectorAll(".panel").forEach(x => x.classList.remove("sel"));
+    b.classList.add("sel");
+    $("p-" + b.dataset.p).classList.add("sel");
+  };
+});
+
+tick();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>

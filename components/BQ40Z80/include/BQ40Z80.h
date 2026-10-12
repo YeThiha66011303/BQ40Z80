@@ -66,6 +66,15 @@ enum class SbsCommand : uint8_t {
     ManufacturerData         = 0x23,   // block, paired with ManufacturerBlockAccess (0x44)
     ManufacturerBlockAccess  = 0x44,   // block
 
+    StateOfHealth            = 0x4F,   // % of design capacity, TRM sec 18.47
+    MaxTurboPwr              = 0x59,   // cW, TRM sec 18.57
+    SusTurboPwr              = 0x5A,   // cW, TRM sec 18.58
+    TurboPackR               = 0x5B,   // mOhm, TRM sec 18.59
+    TurboSysR                = 0x5C,   // mOhm, TRM sec 18.60
+    TurboEdv                 = 0x5D,   // mV, TRM sec 18.61
+    MaxTurboCurr             = 0x5E,   // mA, TRM sec 18.62
+    SusTurboCurr             = 0x5F,   // mA, TRM sec 18.63
+
     CellVoltage4    = 0x3C,
     CellVoltage3    = 0x3D,
     CellVoltage2    = 0x3E,
@@ -115,6 +124,24 @@ enum class MfaSubcommand : uint16_t {
     GaugingStatus4   = 0x007C, // Confirmed vs TRM SLUUBT5C sec 18.1.64, layout confirmed --
                                 // QMax/QMaxDOD0 for cells 5-6
 
+    // --- Added for full telemetry. All layouts confirmed vs TRM SLUUBT5C. ---
+    SafetyAlert      = 0x0050, // sec 18.1.37 -- same bit layout as SafetyStatus,
+                                // but set BEFORE a trip, so it is an early warning
+    PfAlert          = 0x0052, // sec 18.1.39
+    PfStatus         = 0x0053, // sec 18.1.40
+    ChargingStatus   = 0x0055, // sec 18.1.42, 24-bit flags + temperature range
+    NoLoadRemCap     = 0x005A, // sec 18.1.46, word: RemainingCapacity() with no load
+    LifetimeData1    = 0x0060, // sec 18.1.47, cell max/min voltages + max delta
+                                // (DAStatus2 = 0x0072 is already declared above)
+    GaugingStatus2   = 0x0074, // sec 18.1.56, grids, LStatus, DOD0, DODEOC
+    LifetimeData2    = 0x0061, // sec 18.1.48, max currents, temperature extremes,
+                                // reset counters, per-cell balance time totals
+    LifetimeData3    = 0x0062, // sec 18.1.49, firmware runtime and time per temp band
+    CBStatus         = 0x0076, // sec 18.1.58, cell balance times and their DODs
+    GaugingStatus5   = 0x007D, // sec 18.1.65, the cell 7 IT data that 0x0074 and
+                                // 0x007C leave out. Returns zeros on a 6S pack.
+    StateOfHealthFcc = 0x0077, // sec 18.1.59, SOH full charge capacity + energy
+    FilterCapacity   = 0x0078, // sec 18.1.60, smoothed capacity and energy
 };
 
 // -----------------------------------------------------------------------------
@@ -153,6 +180,139 @@ struct DAStatus3 {
     int16_t cellPower7;      // cW
     uint8_t raw[18];         // raw bytes as received, for debugging/verification
     uint8_t rawLen;          // actual bytes returned by device (should be 18)
+};
+
+// DAStatus2 (0x0072). 14 bytes, all 0.1 K. TRM sec 18.1.54.
+// TS3/TS4 read about -273.2 C when no thermistor is fitted.
+struct DAStatus2 {
+    int16_t intTemp_dK;
+    int16_t ts1Temp_dK;
+    int16_t ts2Temp_dK;
+    int16_t ts3Temp_dK;
+    int16_t ts4Temp_dK;
+    int16_t cellTemp_dK;
+    int16_t fetTemp_dK;
+    uint8_t rawLen;            // expect 14
+};
+
+// GaugingStatus2 (0x0074). 32 bytes. TRM sec 18.1.56.
+// Grid values only update during DISCHARGE with [R_DIS] = 0.
+struct GaugingStatus2 {
+    uint8_t packGrid;
+    uint8_t lStatus;           // bit3 QMax, bit2 ITEN, bits1-0 CF1:CF0
+    uint8_t cellGrid[4];
+    uint32_t stateTime_s;      // since last DISCHARGE/CHARGE/REST change
+    int16_t dod0[4];
+    int16_t dod0PassedQ_mAh;
+    int16_t dod0PassedE_cWh;
+    int16_t dod0Time_hr16;     // hr/16
+    int16_t dodEoc[4];         // depth of discharge at end of charge
+    uint8_t rawLen;            // expect 32
+
+    // LStatus decode
+    bool itEnabled() const      { return (lStatus >> 2) & 1; }
+    bool qmaxUpdatedField() const { return (lStatus >> 3) & 1; }
+    uint8_t qmaxStatus() const  { return lStatus & 0x03; } // 0=OK, 1=QMax first update, 2=QMax+Ra
+};
+
+// FilterCapacity (0x0078). 8 bytes. TRM sec 18.1.60.
+// Smoothed values, reported even when [SMOOTH] = 0.
+struct FilterCapacity {
+    int16_t remainingCapacity_mAh;
+    int16_t remainingEnergy_mWh;
+    int16_t fullChargeCapacity_mAh;
+    int16_t fullChargeEnergy_mWh;
+    uint8_t rawLen;            // expect 8
+};
+
+// CBStatus (0x0076). 30 bytes. TRM sec 18.1.58.
+struct CBStatus {
+    int16_t balanceTime_s[7];  // calculated balancing time per cell
+    int16_t balanceDod[7];     // DOD used to compute each cell's balance time
+    int16_t totalDodCharge;
+    uint8_t rawLen;            // expect 30
+};
+
+// Lifetime Data Block 1 (0x0060). 30 bytes. TRM sec 18.1.47.
+struct LifetimeData1 {
+    int16_t cellMaxVoltage_mV[7];
+    int16_t cellMinVoltage_mV[7];
+    int16_t maxDeltaCellVoltage_mV;
+    uint8_t rawLen;            // expect 30
+};
+
+// Lifetime Data Block 2 (0x0061). 25 bytes. TRM sec 18.1.48.
+// Temperatures here are single bytes, not the 0.1 K words used elsewhere.
+struct LifetimeData2 {
+    int16_t maxChargeCurrent_mA;
+    int16_t maxDischargeCurrent_mA;
+    int16_t maxAvgDsgCurrent_mA;
+    int16_t maxAvgDsgPower_cW;
+    int8_t  maxTempCell_C;
+    int8_t  minTempCell_C;
+    int8_t  maxDeltaCellTemp_C;
+    int8_t  maxTempIntSensor_C;
+    int8_t  minTempIntSensor_C;
+    int8_t  maxTempFet_C;
+    uint8_t numShutdowns;
+    uint8_t numPartialResets;
+    uint8_t numFullResets;
+    uint8_t numWdtResets;
+    uint8_t cbTimeCell_h[7];   // cumulative balance time per cell
+    uint8_t rawLen;            // expect 25
+};
+
+// Lifetime Data Block 3 (0x0062). 16 bytes. TRM sec 18.1.49.
+struct LifetimeData3 {
+    uint16_t totalFwRuntime;
+    uint16_t timeInUT;
+    uint16_t timeInLT;
+    uint16_t timeInSTL;
+    uint16_t timeInRT;
+    uint16_t timeInSTH;
+    uint16_t timeInHT;
+    uint16_t timeInOT;
+    uint8_t  rawLen;           // expect 16
+};
+
+// GaugingStatus5 (0x007D). 15 bytes, all cell 7. TRM sec 18.1.65.
+// Reads as zeros on a 6S pack; included so a 7S build needs no driver change.
+struct GaugingStatus5 {
+    int16_t raScale6;
+    int16_t compRes6;
+    int16_t dod0_6;
+    int16_t dodEoc6;
+    int16_t qmax6_mAh;
+    int16_t qmaxDod0_6;
+    int16_t rawDod0_6;
+    uint8_t cellGrid6;
+    uint8_t rawLen;            // expect 15
+};
+
+// ChargingStatus (0x0055). 24-bit flags. TRM sec 18.1.42.
+struct ChargingStatus {
+    uint32_t raw;
+    // Charging status, bits 23-8
+    bool nct;   // Bit19: near charge termination, within ~40 s
+    bool ccc;   // Bit18: charging loss compensation
+    bool cvr;   // Bit17: charging voltage rate of change
+    bool ccr;   // Bit16: charging current rate of change
+    bool vct;   // Bit15: charge termination  <-- the one that lets FCC learn
+    bool mchg;  // Bit14: maintenance charge
+    bool su;    // Bit13: suspend charge
+    bool in;    // Bit12: charge inhibit
+    bool hv;    // Bit11: high voltage region
+    bool mv;    // Bit10: medium voltage region
+    bool lv;    // Bit9:  low voltage region
+    bool pv;    // Bit8:  precharge voltage region
+    // Temperature range, bits 6-0
+    bool ot;    // Bit6: over temperature
+    bool ht;    // Bit5: high temperature
+    bool sth;   // Bit4: standard temperature high
+    bool rt;    // Bit3: recommended temperature
+    bool stl;   // Bit2: standard temperature low
+    bool lt;    // Bit1: low temperature
+    bool ut;    // Bit0: under temperature
 };
 
 struct OperationStatus {
@@ -429,15 +589,19 @@ public:
     esp_err_t getDeviceName(char *buf, size_t bufLen);
     esp_err_t getDeviceChemistry(char *buf, size_t bufLen);
 
-    // ---- Layer 3/5: charge/discharge/precharge/pre-discharge FET control --------
-    esp_err_t toggleChargeFet();
-    esp_err_t toggleDischargeFet();
-    esp_err_t togglePrechargeFet();     // PCHG FET, 0x001E -- precharge path only
-    esp_err_t togglePreDischargeFet();  // PDSG FET, 0x001C -- pre-discharge path only
-    esp_err_t toggleFuse();             // 0x001D -- WARNING: can be a one-way/destructive
-    esp_err_t toggleFetEnable();
-
-    esp_err_t toggleGaugingEnable();
+    // ---- FET / gauging control: REMOVED --------------------------------------
+    // toggleChargeFet, toggleDischargeFet, togglePrechargeFet,
+    // togglePreDischargeFet, toggleFuse, toggleFetEnable, toggleGaugingEnable.
+    //
+    // This driver is read-only by design. Charge and discharge control belongs to
+    // the BQ40Z80's own protection firmware, configured through BQStudio. Having
+    // the host second-guess it was the source of the manual-FET-mode races we hit:
+    // the host would clear FET_EN, take over, then fail to re-assert a toggle and
+    // leave the pack unprotected. toggleFuse in particular could blow the fuse,
+    // which is not reversible.
+    //
+    // If control is ever genuinely needed, restore it deliberately behind an
+    // explicit opt-in, not as an always-available part of the monitoring API.
 
     // ---- Layer 3: extended manufacturer block reads --------------------------
     esp_err_t readDAStatus1(DAStatus1 &out);
@@ -448,13 +612,12 @@ public:
     esp_err_t getDeviceType(uint16_t &type);
     esp_err_t getFirmwareVersion(uint8_t *buf, uint8_t &len, uint8_t maxLen);
 
-    // ---- Layer 3/5: security & lifecycle --------------------------------------
-    esp_err_t unseal(uint16_t keyWord1 = kDefaultUnsealKeyWord1,
-                      uint16_t keyWord2 = kDefaultUnsealKeyWord2);
-    esp_err_t fullAccess(uint16_t keyWord1 = kDefaultFullAccessKeyWord1,
-                          uint16_t keyWord2 = kDefaultFullAccessKeyWord2);
-    esp_err_t seal();
-    esp_err_t reset();
+    // ---- Security & lifecycle: REMOVED ---------------------------------------
+    // unseal, fullAccess, seal, reset. These were never implemented, so calling
+    // any of them produced a link error rather than a compile error. Security
+    // state is changed in BQStudio, which is also where the real keys live --
+    // the placeholder keys that used to sit here were TI published defaults and
+    // were unlikely to match this pack.
 
     esp_err_t getOperationStatus(OperationStatus &out);
 
@@ -468,9 +631,11 @@ public:
     esp_err_t getGaugingStatus1(GaugingStatus1 &out); // CompRes (Cell Resistance) for cells 1-4
     esp_err_t getGaugingStatus4(GaugingStatus4 &out);
 
-    // ---- Layer 4: data flash (raw) --------------------------------------------
+    // ---- Layer 4: data flash (read only) --------------------------------------
+    // writeDataFlash removed. Configuration is written in BQStudio, where the
+    // change is visible, verifiable and revertible, rather than from firmware
+    // that would silently reapply it on every boot.
     esp_err_t readDataFlash(uint16_t flashAddress, uint8_t *data, uint8_t len);
-    esp_err_t writeDataFlash(uint16_t flashAddress, const uint8_t *data, uint8_t len);
 
     esp_err_t getDaConfigurationNR(bool &nr, uint16_t &rawValue);
 
@@ -481,25 +646,108 @@ public:
     esp_err_t getChemId(uint16_t &chemId);
 
     esp_err_t getCounterDecDelayOCD(uint8_t &seconds);
+
+    // Enabled Protections C (0x4BC0). Bit 6 is OC (Overcharge).
+    // TI default 0xFF; this device ships 0xD5. Clearing bit 6 gives 0x95, which
+    // disables OC while leaving CHGC, CTO, PTO and OTF enabled.
+    // Read-only here on purpose: change it in BQStudio so the edit is visible
+    // and revertible, not buried in firmware that reapplies it every boot.
+    esp_err_t getEnabledProtectionsC(uint8_t &raw);
+
+    // Mfg Status Init (0x4800). ManufacturingStatus() is reloaded from this on
+    // every reset and on a seal -- TRM SLUUBT5C sec 16.1. The live
+    // ManufacturingStatus() can therefore disagree with it, and after a reset
+    // this value is the one that wins. If FET_EN (bit 4) is clear here, a reset
+    // takes firmware FET control away whatever the RAM copy currently says.
+    esp_err_t getMfgStatusInit(uint16_t &raw);
+
+    // ---- The only write this driver permits ---------------------------------
+    // DeviceReset, MAC 0x0041 (TRM SLUUBT5C sec 18.1.36). Unlike every other
+    // method here this is a genuine control command, not a block read that
+    // happens to need a subcommand written first. It reboots the gauge,
+    // clears the latched SafetyStatus bits, bumps the lifetime reset counters,
+    // and reloads ManufacturingStatus() from Mfg Status Init in data flash.
+    //
+    // That last part is the dangerous one: if Mfg Status Init[FET_EN] is clear,
+    // the firmware stops driving the CHG/DSG/PCHG FETs after this returns and
+    // the pack will not charge or discharge until it is restored in BQStudio.
+    // Call getMfgStatusInit() and check bit 4 before using this.
+    //
+    // The write transport stays private. This is the one door, and it opens
+    // onto exactly one subcommand.
+    esp_err_t deviceReset();
+
+    // ---- Additional telemetry (everything BQStudio's Registers view shows) ----
+    esp_err_t readDAStatus2(DAStatus2 &out);            // all 7 temperatures
+    esp_err_t readGaugingStatus2(GaugingStatus2 &out);  // grids, LStatus, DOD0, DODEOC
+    esp_err_t readFilterCapacity(FilterCapacity &out);  // smoothed capacity/energy
+    esp_err_t readCBStatus(CBStatus &out);              // cell balance times
+    esp_err_t readLifetimeData1(LifetimeData1 &out);    // cell max/min voltage records
+    esp_err_t readLifetimeData2(LifetimeData2 &out);    // max currents, temp extremes, resets
+    esp_err_t readLifetimeData3(LifetimeData3 &out);    // runtime, time per temperature band
+    esp_err_t readGaugingStatus5(GaugingStatus5 &out);  // cell 7 IT data (zeros on 6S)
+    esp_err_t getChargingStatus(ChargingStatus &out);
+
+    // SafetyAlert shares SafetyStatus's bit layout but is set before a trip,
+    // so it is the early warning that something is approaching a threshold.
+    esp_err_t getSafetyAlert(SafetyStatus &out);
+
+    // PF bit layouts are not yet mapped against the TRM, so these return raw.
+    esp_err_t getPfStatusRaw(uint32_t &raw);
+    esp_err_t getPfAlertRaw(uint32_t &raw);
+
+    esp_err_t getNoLoadRemainingCapacity(uint16_t &mAh);
+    esp_err_t getStateOfHealthFcc(uint16_t &mAh, uint16_t &cWh);
+
+    // ---- Additional standard SBS word reads ----------------------------------
+    esp_err_t getStateOfHealth(uint16_t &percent);
+    esp_err_t getBatteryMode(uint16_t &flags);
+    esp_err_t getMaxError(uint8_t &percent);
+    esp_err_t getRemainingCapacityAlarm(uint16_t &mAh);
+    esp_err_t getRemainingTimeAlarm(uint16_t &minutes);
+    esp_err_t getAtRate(int16_t &mA);
+    esp_err_t getAtRateTimeToFull(uint16_t &minutes);
+    esp_err_t getAtRateTimeToEmpty(uint16_t &minutes);
+    esp_err_t getAtRateOK(uint16_t &ok);
+    esp_err_t getMaxTurboPower(int16_t &cW);
+    esp_err_t getSustainedTurboPower(int16_t &cW);
+    esp_err_t getMaxTurboCurrent(int16_t &mA);
+    esp_err_t getSustainedTurboCurrent(int16_t &mA);
+    esp_err_t getTurboPackResistance(uint16_t &mOhm);
+    esp_err_t getTurboSysResistance(uint16_t &mOhm);
+    esp_err_t getTurboEdv(uint16_t &mV);
     esp_err_t getCounterDecDelayAOLD(uint8_t &seconds);
     esp_err_t getCounterDecDelayASCC(uint8_t &seconds);
     esp_err_t getCounterDecDelayASCD(uint8_t &seconds);
 
-    // ---- Layer 1: raw primitives (exposed for advanced/custom use) ------------
+    // ---- Layer 1: raw primitives (read side, exposed for custom reads) --------
     esp_err_t smbusReadWord(uint8_t command, uint16_t &value);
-    esp_err_t smbusWriteWord(uint8_t command, uint16_t value);
     esp_err_t smbusReadBlock(uint8_t command, uint8_t *data, uint8_t &len, uint8_t maxLen);
-    esp_err_t smbusWriteBlock(uint8_t command, const uint8_t *data, uint8_t len);
-
-    esp_err_t manufacturerAccessSend(uint16_t subcommand);
     esp_err_t manufacturerAccessReadWord(uint16_t subcommand, uint16_t &value);
     esp_err_t manufacturerBlockRead(uint16_t subcommand, uint8_t *data, uint8_t &len, uint8_t maxLen);
-    esp_err_t manufacturerBlockWrite(uint16_t subcommand, const uint8_t *data, uint8_t len);
+
+    // smbusWriteWord, smbusWriteBlock, manufacturerAccessSend and
+    // manufacturerBlockWrite are no longer public. The first three are still
+    // used internally: a MAC block read works by writing the 2-byte subcommand
+    // to ManufacturerBlockAccess (0x44) and reading the payload back from
+    // ManufacturerData (0x23), so the write is part of the read. Keeping them
+    // private means that transport cannot be repurposed to send a control
+    // subcommand such as a FET toggle from application code.
 
     // ---- Bus recovery ---------------------------------------------------------
     esp_err_t recoverBus();
 
 private:
+    // Write transport. Private on purpose: required to issue MAC subcommands as
+    // part of a block read, but not reachable from application code, so it
+    // cannot be repurposed to send a control subcommand.
+    esp_err_t smbusWriteWord(uint8_t command, uint16_t value);
+    esp_err_t smbusWriteBlock(uint8_t command, const uint8_t *data, uint8_t len);
+    esp_err_t manufacturerAccessSend(uint16_t subcommand);
+
+    // SafetyAlert and SafetyStatus share a bit layout; one decoder serves both.
+    esp_err_t decodeSafetyBits(uint16_t subcommand, SafetyStatus &out);
+
     gpio_num_t  sclPin_;
     gpio_num_t  sdaPin_;
     i2c_port_t  port_;
@@ -515,6 +763,6 @@ private:
     esp_err_t smbusReadBlockOnce(uint8_t command, uint8_t *data, uint8_t &len, uint8_t maxLen);
     esp_err_t smbusWriteBlockOnce(uint8_t command, const uint8_t *data, uint8_t len);
 
-    esp_err_t i2cWriteBytes(const uint8_t *data, size_t len, bool sendStop);
-    esp_err_t i2cWriteThenRead(const uint8_t *wdata, size_t wlen, uint8_t *rdata, size_t rlen);
+    // i2cWriteBytes / i2cWriteThenRead removed: declared by an old refactor,
+    // never defined, never called. The smbus*Once methods do this work directly.
 };

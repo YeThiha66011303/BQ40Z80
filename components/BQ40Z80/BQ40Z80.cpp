@@ -1,4 +1,6 @@
 #include "BQ40Z80.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "driver/gpio.h"
 #include "esp_rom_sys.h"
 #include <cstring>
@@ -309,22 +311,12 @@ esp_err_t BQ40Z80::manufacturerBlockRead(uint16_t subcommand, uint8_t *data, uin
     return smbusReadBlock(static_cast<uint8_t>(SbsCommand::ManufacturerData), data, len, maxLen);
 }
 
-esp_err_t BQ40Z80::manufacturerBlockWrite(uint16_t subcommand, const uint8_t *data, uint8_t len) {
-    if (len > 30) return ESP_ERR_INVALID_ARG; // 2 subcommand bytes + data must fit in 32
-    uint8_t payload[32] = {0};
-    payload[0] = (uint8_t)(subcommand & 0xFF);
-    payload[1] = (uint8_t)((subcommand >> 8) & 0xFF);
-    for (int i = 0; i < len; i++) payload[2 + i] = data[i];
-    return smbusWriteBlock(static_cast<uint8_t>(SbsCommand::ManufacturerBlockAccess), payload, (uint8_t)(2 + len));
-}
+// manufacturerBlockWrite and writeDataFlash removed: this driver is read-only.
+// Data flash is written in BQStudio.
 
 esp_err_t BQ40Z80::readDataFlash(uint16_t flashAddress, uint8_t *data, uint8_t len) {
     uint8_t rawLen = 0;
     return manufacturerBlockRead(flashAddress, data, rawLen, len);
-}
-
-esp_err_t BQ40Z80::writeDataFlash(uint16_t flashAddress, const uint8_t *data, uint8_t len) {
-    return manufacturerBlockWrite(flashAddress, data, len);
 }
 
 esp_err_t BQ40Z80::getDaConfigurationNR(bool &nr, uint16_t &rawValue) {
@@ -445,6 +437,104 @@ esp_err_t BQ40Z80::getChemId(uint16_t &chemId) {
 }
 
 // ---- DeviceChemistry() -- declared previously but never defined --------------
+// -----------------------------------------------------------------------------
+// Standard SBS word getters. These were declared in the header for a long time
+// without being defined, so any call compiled cleanly and then failed at link.
+// -----------------------------------------------------------------------------
+esp_err_t BQ40Z80::getAverageCurrent(int16_t &mA) {
+    uint16_t raw = 0;
+    esp_err_t err = smbusReadWord(static_cast<uint8_t>(SbsCommand::AverageCurrent), raw);
+    if (err == ESP_OK) mA = (int16_t)raw; // signed: negative = discharging
+    return err;
+}
+
+esp_err_t BQ40Z80::getRelativeStateOfCharge(uint8_t &percent) {
+    uint16_t raw = 0;
+    esp_err_t err = smbusReadWord(static_cast<uint8_t>(SbsCommand::RelativeStateOfCharge), raw);
+    if (err == ESP_OK) percent = (uint8_t)(raw & 0xFF);
+    return err;
+}
+
+esp_err_t BQ40Z80::getAbsoluteStateOfCharge(uint8_t &percent) {
+    uint16_t raw = 0;
+    esp_err_t err = smbusReadWord(static_cast<uint8_t>(SbsCommand::AbsoluteStateOfCharge), raw);
+    if (err == ESP_OK) percent = (uint8_t)(raw & 0xFF);
+    return err;
+}
+
+esp_err_t BQ40Z80::getRunTimeToEmpty(uint16_t &minutes) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::RunTimeToEmpty), minutes);
+}
+
+esp_err_t BQ40Z80::getAverageTimeToEmpty(uint16_t &minutes) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::AverageTimeToEmpty), minutes);
+}
+
+esp_err_t BQ40Z80::getAverageTimeToFull(uint16_t &minutes) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::AverageTimeToFull), minutes);
+}
+
+esp_err_t BQ40Z80::getCycleCount(uint16_t &cycles) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::CycleCount), cycles);
+}
+
+esp_err_t BQ40Z80::getDesignVoltage(uint16_t &mV) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::DesignVoltage), mV);
+}
+
+esp_err_t BQ40Z80::getSerialNumber(uint16_t &serial) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::SerialNumber), serial);
+}
+
+// Packed as (year-1980)<<9 | month<<5 | day
+esp_err_t BQ40Z80::getManufactureDate(uint16_t &packedDate) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::ManufactureDate), packedDate);
+}
+
+// ---- Block string getters ----------------------------------------------------
+esp_err_t BQ40Z80::getManufacturerName(char *buf, size_t bufLen) {
+    if (bufLen == 0) return ESP_ERR_INVALID_ARG;
+    uint8_t raw[32] = {0};
+    uint8_t rawLen = 0;
+    uint8_t maxLen = (bufLen - 1 > 32) ? 32 : (uint8_t)(bufLen - 1);
+    esp_err_t err = smbusReadBlock(static_cast<uint8_t>(SbsCommand::ManufacturerName),
+                                    raw, rawLen, maxLen);
+    if (err != ESP_OK) return err;
+    memcpy(buf, raw, rawLen);
+    buf[rawLen] = '\0';
+    return ESP_OK;
+}
+
+esp_err_t BQ40Z80::getDeviceName(char *buf, size_t bufLen) {
+    if (bufLen == 0) return ESP_ERR_INVALID_ARG;
+    uint8_t raw[32] = {0};
+    uint8_t rawLen = 0;
+    uint8_t maxLen = (bufLen - 1 > 32) ? 32 : (uint8_t)(bufLen - 1);
+    esp_err_t err = smbusReadBlock(static_cast<uint8_t>(SbsCommand::DeviceName),
+                                    raw, rawLen, maxLen);
+    if (err != ESP_OK) return err;
+    memcpy(buf, raw, rawLen);
+    buf[rawLen] = '\0';
+    return ESP_OK;
+}
+
+// ---- MAC identity reads ------------------------------------------------------
+esp_err_t BQ40Z80::getDeviceType(uint16_t &type) {
+    uint8_t raw[2] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::DeviceType),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+    if (rawLen < 2) return ESP_ERR_INVALID_SIZE;
+    type = (uint16_t)raw[0] | ((uint16_t)raw[1] << 8);
+    return ESP_OK;
+}
+
+esp_err_t BQ40Z80::getFirmwareVersion(uint8_t *buf, uint8_t &len, uint8_t maxLen) {
+    return manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::FirmwareVersion),
+                                  buf, len, maxLen);
+}
+
 esp_err_t BQ40Z80::getDeviceChemistry(char *buf, size_t bufLen) {
     if (bufLen == 0) return ESP_ERR_INVALID_ARG;
 
@@ -458,6 +548,369 @@ esp_err_t BQ40Z80::getDeviceChemistry(char *buf, size_t bufLen) {
     memcpy(buf, raw, rawLen);
     buf[rawLen] = '\0';
     return ESP_OK;
+}
+
+// Enabled Protections C (0x4BC0). Bit 6 = OC (Overcharge), bit 7 = CHGC,
+// bit 4 = CTO, bit 2 = PTO, bit 1 = HWDF, bit 0 = OTF. Confirmed vs TRM 19.2.4.4.
+esp_err_t BQ40Z80::getEnabledProtectionsC(uint8_t &raw) {
+    return readDataFlash(0x4BC0, &raw, 1);
+}
+
+// Mfg Status Init (0x4800), H2. Same bit layout as ManufacturingStatus().
+// Confirmed vs TRM SLUUBT5C sec 16.1 and the data flash table (sec 19).
+// The sole control command. See the header for what it costs.
+esp_err_t BQ40Z80::deviceReset() {
+    return manufacturerAccessSend(
+        static_cast<uint16_t>(MfaSubcommand::DeviceReset));
+}
+
+esp_err_t BQ40Z80::getMfgStatusInit(uint16_t &raw) {
+    uint8_t b[2] = {0};
+    esp_err_t err = readDataFlash(0x4800, b, 2);
+    if (err != ESP_OK) return err;
+    raw = (uint16_t)b[0] | ((uint16_t)b[1] << 8);
+    return ESP_OK;
+}
+
+// =============================================================================
+// Additional telemetry. Every layout below is taken from the field tables in
+// TRM SLUUBT5C section 18.1. All little endian, low byte first.
+// =============================================================================
+static inline int16_t rd16le(const uint8_t *p) {
+    return (int16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
+}
+
+// DAStatus2 (0x0072) -- 14 bytes, seven temperatures in 0.1 K. TRM sec 18.1.54.
+esp_err_t BQ40Z80::readDAStatus2(DAStatus2 &out) {
+    uint8_t raw[14] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::DAStatus2),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+    out.rawLen = rawLen;
+    if (rawLen < 14) return ESP_ERR_INVALID_SIZE;
+
+    out.intTemp_dK  = rd16le(&raw[0]);
+    out.ts1Temp_dK  = rd16le(&raw[2]);
+    out.ts2Temp_dK  = rd16le(&raw[4]);
+    out.ts3Temp_dK  = rd16le(&raw[6]);
+    out.ts4Temp_dK  = rd16le(&raw[8]);
+    out.cellTemp_dK = rd16le(&raw[10]);
+    out.fetTemp_dK  = rd16le(&raw[12]);
+    return ESP_OK;
+}
+
+// GaugingStatus2 (0x0074) -- 32 bytes. TRM sec 18.1.56. Layout:
+//   0     Pack Grid            6-9   State Time (u32)
+//   1     LStatus              10-17 DOD0 cells 1-4
+//   2-5   Cell Grid 0-3        18-19 DOD0 Passed Q (mAh)
+//                              20-21 DOD0 Passed E (cWh)
+//                              22-23 DOD0 Time (hr/16)
+//                              24-31 DODEOC cells 1-4
+esp_err_t BQ40Z80::readGaugingStatus2(GaugingStatus2 &out) {
+    uint8_t raw[32] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::GaugingStatus2),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+    out.rawLen = rawLen;
+    if (rawLen < 32) return ESP_ERR_INVALID_SIZE;
+
+    out.packGrid = raw[0];
+    out.lStatus  = raw[1];
+    for (int i = 0; i < 4; i++) out.cellGrid[i] = raw[2 + i];
+
+    out.stateTime_s = (uint32_t)raw[6]
+                    | ((uint32_t)raw[7] << 8)
+                    | ((uint32_t)raw[8] << 16)
+                    | ((uint32_t)raw[9] << 24);
+
+    for (int i = 0; i < 4; i++) out.dod0[i] = rd16le(&raw[10 + i * 2]);
+    out.dod0PassedQ_mAh = rd16le(&raw[18]);
+    out.dod0PassedE_cWh = rd16le(&raw[20]);
+    out.dod0Time_hr16   = rd16le(&raw[22]);
+    for (int i = 0; i < 4; i++) out.dodEoc[i] = rd16le(&raw[24 + i * 2]);
+    return ESP_OK;
+}
+
+// FilterCapacity (0x0078) -- 8 bytes. TRM sec 18.1.60.
+esp_err_t BQ40Z80::readFilterCapacity(FilterCapacity &out) {
+    uint8_t raw[8] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::FilterCapacity),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+    out.rawLen = rawLen;
+    if (rawLen < 8) return ESP_ERR_INVALID_SIZE;
+
+    out.remainingCapacity_mAh  = rd16le(&raw[0]);
+    out.remainingEnergy_mWh    = rd16le(&raw[2]);
+    out.fullChargeCapacity_mAh = rd16le(&raw[4]);
+    out.fullChargeEnergy_mWh   = rd16le(&raw[6]);
+    return ESP_OK;
+}
+
+// CBStatus (0x0076) -- 30 bytes: 7 balance times, 7 DODs, total DOD charge.
+// TRM sec 18.1.58.
+esp_err_t BQ40Z80::readCBStatus(CBStatus &out) {
+    uint8_t raw[30] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::CBStatus),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+    out.rawLen = rawLen;
+    if (rawLen < 30) return ESP_ERR_INVALID_SIZE;
+
+    for (int i = 0; i < 7; i++) out.balanceTime_s[i] = rd16le(&raw[i * 2]);
+    for (int i = 0; i < 7; i++) out.balanceDod[i]    = rd16le(&raw[14 + i * 2]);
+    out.totalDodCharge = rd16le(&raw[28]);
+    return ESP_OK;
+}
+
+// Lifetime Data Block 1 (0x0060) -- 30 bytes: 7 max, 7 min, max delta.
+// TRM sec 18.1.47. These persist across power cycles.
+esp_err_t BQ40Z80::readLifetimeData1(LifetimeData1 &out) {
+    uint8_t raw[30] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::LifetimeData1),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+    out.rawLen = rawLen;
+    if (rawLen < 30) return ESP_ERR_INVALID_SIZE;
+
+    for (int i = 0; i < 7; i++) out.cellMaxVoltage_mV[i] = rd16le(&raw[i * 2]);
+    for (int i = 0; i < 7; i++) out.cellMinVoltage_mV[i] = rd16le(&raw[14 + i * 2]);
+    out.maxDeltaCellVoltage_mV = rd16le(&raw[28]);
+    return ESP_OK;
+}
+
+// Lifetime Data Block 2 (0x0061) -- 25 bytes. TRM sec 18.1.48.
+// Note the mixed widths: four signed words, then single-byte temperatures and
+// counters. Temperatures here are plain degC, not the 0.1 K used by DAStatus2.
+esp_err_t BQ40Z80::readLifetimeData2(LifetimeData2 &out) {
+    uint8_t raw[25] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::LifetimeData2),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+    out.rawLen = rawLen;
+    if (rawLen < 25) return ESP_ERR_INVALID_SIZE;
+
+    out.maxChargeCurrent_mA    = rd16le(&raw[0]);
+    out.maxDischargeCurrent_mA = rd16le(&raw[2]);
+    out.maxAvgDsgCurrent_mA    = rd16le(&raw[4]);
+    out.maxAvgDsgPower_cW      = rd16le(&raw[6]);
+    out.maxTempCell_C          = (int8_t)raw[8];
+    out.minTempCell_C          = (int8_t)raw[9];
+    out.maxDeltaCellTemp_C     = (int8_t)raw[10];
+    out.maxTempIntSensor_C     = (int8_t)raw[11];
+    out.minTempIntSensor_C     = (int8_t)raw[12];
+    out.maxTempFet_C           = (int8_t)raw[13];
+    out.numShutdowns           = raw[14];
+    out.numPartialResets       = raw[15];
+    out.numFullResets          = raw[16];
+    out.numWdtResets           = raw[17];
+    for (int i = 0; i < 7; i++) out.cbTimeCell_h[i] = raw[18 + i];
+    return ESP_OK;
+}
+
+// Lifetime Data Block 3 (0x0062) -- 16 bytes, eight words. TRM sec 18.1.49.
+esp_err_t BQ40Z80::readLifetimeData3(LifetimeData3 &out) {
+    uint8_t raw[16] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::LifetimeData3),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+    out.rawLen = rawLen;
+    if (rawLen < 16) return ESP_ERR_INVALID_SIZE;
+
+    out.totalFwRuntime = (uint16_t)rd16le(&raw[0]);
+    out.timeInUT       = (uint16_t)rd16le(&raw[2]);
+    out.timeInLT       = (uint16_t)rd16le(&raw[4]);
+    out.timeInSTL      = (uint16_t)rd16le(&raw[6]);
+    out.timeInRT       = (uint16_t)rd16le(&raw[8]);
+    out.timeInSTH      = (uint16_t)rd16le(&raw[10]);
+    out.timeInHT       = (uint16_t)rd16le(&raw[12]);
+    out.timeInOT       = (uint16_t)rd16le(&raw[14]);
+    return ESP_OK;
+}
+
+// GaugingStatus5 (0x007D) -- 15 bytes, all cell 7. TRM sec 18.1.65.
+esp_err_t BQ40Z80::readGaugingStatus5(GaugingStatus5 &out) {
+    uint8_t raw[15] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::GaugingStatus5),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+    out.rawLen = rawLen;
+    if (rawLen < 15) return ESP_ERR_INVALID_SIZE;
+
+    out.raScale6   = rd16le(&raw[0]);
+    out.compRes6   = rd16le(&raw[2]);
+    out.dod0_6     = rd16le(&raw[4]);
+    out.dodEoc6    = rd16le(&raw[6]);
+    out.qmax6_mAh  = rd16le(&raw[8]);
+    out.qmaxDod0_6 = rd16le(&raw[10]);
+    out.rawDod0_6  = rd16le(&raw[12]);
+    out.cellGrid6  = raw[14];
+    return ESP_OK;
+}
+
+// ChargingStatus (0x0055) -- 24-bit flags. TRM sec 18.1.42.
+esp_err_t BQ40Z80::getChargingStatus(ChargingStatus &out) {
+    uint8_t raw[4] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::ChargingStatus),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+    if (rawLen < 3) return ESP_ERR_INVALID_SIZE;
+
+    out.raw = (uint32_t)raw[0] | ((uint32_t)raw[1] << 8) | ((uint32_t)raw[2] << 16);
+
+    out.nct  = (out.raw >> 19) & 1;
+    out.ccc  = (out.raw >> 18) & 1;
+    out.cvr  = (out.raw >> 17) & 1;
+    out.ccr  = (out.raw >> 16) & 1;
+    out.vct  = (out.raw >> 15) & 1;
+    out.mchg = (out.raw >> 14) & 1;
+    out.su   = (out.raw >> 13) & 1;
+    out.in   = (out.raw >> 12) & 1;
+    out.hv   = (out.raw >> 11) & 1;
+    out.mv   = (out.raw >> 10) & 1;
+    out.lv   = (out.raw >> 9)  & 1;
+    out.pv   = (out.raw >> 8)  & 1;
+    out.ot   = (out.raw >> 6)  & 1;
+    out.ht   = (out.raw >> 5)  & 1;
+    out.sth  = (out.raw >> 4)  & 1;
+    out.rt   = (out.raw >> 3)  & 1;
+    out.stl  = (out.raw >> 2)  & 1;
+    out.lt   = (out.raw >> 1)  & 1;
+    out.ut   = (out.raw >> 0)  & 1;
+    return ESP_OK;
+}
+
+esp_err_t BQ40Z80::getNoLoadRemainingCapacity(uint16_t &mAh) {
+    return manufacturerAccessReadWord(static_cast<uint16_t>(MfaSubcommand::NoLoadRemCap), mAh);
+}
+
+// State-of-Health (0x0077) -- 4 bytes: FCC in mAh, energy in cWh. TRM sec 18.1.59.
+esp_err_t BQ40Z80::getStateOfHealthFcc(uint16_t &mAh, uint16_t &cWh) {
+    uint8_t raw[4] = {0};
+    uint8_t rawLen = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::StateOfHealthFcc),
+                                           raw, rawLen, sizeof(raw));
+    if (err != ESP_OK) return err;
+    if (rawLen < 4) return ESP_ERR_INVALID_SIZE;
+    mAh = (uint16_t)raw[0] | ((uint16_t)raw[1] << 8);
+    cWh = (uint16_t)raw[2] | ((uint16_t)raw[3] << 8);
+    return ESP_OK;
+}
+
+esp_err_t BQ40Z80::getPfStatusRaw(uint32_t &raw) {
+    uint8_t buf[4] = {0};
+    uint8_t len = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::PfStatus),
+                                           buf, len, sizeof(buf));
+    if (err != ESP_OK) return err;
+    if (len < 4) return ESP_ERR_INVALID_SIZE;
+    raw = (uint32_t)buf[0] | ((uint32_t)buf[1] << 8)
+        | ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24);
+    return ESP_OK;
+}
+
+esp_err_t BQ40Z80::getPfAlertRaw(uint32_t &raw) {
+    uint8_t buf[4] = {0};
+    uint8_t len = 0;
+    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::PfAlert),
+                                           buf, len, sizeof(buf));
+    if (err != ESP_OK) return err;
+    if (len < 4) return ESP_ERR_INVALID_SIZE;
+    raw = (uint32_t)buf[0] | ((uint32_t)buf[1] << 8)
+        | ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24);
+    return ESP_OK;
+}
+
+// ---- Additional standard SBS word reads --------------------------------------
+esp_err_t BQ40Z80::getStateOfHealth(uint16_t &percent) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::StateOfHealth), percent);
+}
+
+esp_err_t BQ40Z80::getBatteryMode(uint16_t &flags) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::BatteryMode), flags);
+}
+
+esp_err_t BQ40Z80::getMaxError(uint8_t &percent) {
+    uint16_t raw = 0;
+    esp_err_t err = smbusReadWord(static_cast<uint8_t>(SbsCommand::MaxError), raw);
+    if (err == ESP_OK) percent = (uint8_t)(raw & 0xFF);
+    return err;
+}
+
+esp_err_t BQ40Z80::getRemainingCapacityAlarm(uint16_t &mAh) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::RemainingCapacityAlarm), mAh);
+}
+
+esp_err_t BQ40Z80::getRemainingTimeAlarm(uint16_t &minutes) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::RemainingTimeAlarm), minutes);
+}
+
+esp_err_t BQ40Z80::getAtRate(int16_t &mA) {
+    uint16_t raw = 0;
+    esp_err_t err = smbusReadWord(static_cast<uint8_t>(SbsCommand::AtRate), raw);
+    if (err == ESP_OK) mA = (int16_t)raw;
+    return err;
+}
+
+esp_err_t BQ40Z80::getAtRateTimeToFull(uint16_t &minutes) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::AtRateTimeToFull), minutes);
+}
+
+esp_err_t BQ40Z80::getAtRateTimeToEmpty(uint16_t &minutes) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::AtRateTimeToEmpty), minutes);
+}
+
+esp_err_t BQ40Z80::getAtRateOK(uint16_t &ok) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::AtRateOK), ok);
+}
+
+esp_err_t BQ40Z80::getMaxTurboPower(int16_t &cW) {
+    uint16_t raw = 0;
+    esp_err_t err = smbusReadWord(static_cast<uint8_t>(SbsCommand::MaxTurboPwr), raw);
+    if (err == ESP_OK) cW = (int16_t)raw;
+    return err;
+}
+
+esp_err_t BQ40Z80::getSustainedTurboPower(int16_t &cW) {
+    uint16_t raw = 0;
+    esp_err_t err = smbusReadWord(static_cast<uint8_t>(SbsCommand::SusTurboPwr), raw);
+    if (err == ESP_OK) cW = (int16_t)raw;
+    return err;
+}
+
+esp_err_t BQ40Z80::getMaxTurboCurrent(int16_t &mA) {
+    uint16_t raw = 0;
+    esp_err_t err = smbusReadWord(static_cast<uint8_t>(SbsCommand::MaxTurboCurr), raw);
+    if (err == ESP_OK) mA = (int16_t)raw;
+    return err;
+}
+
+esp_err_t BQ40Z80::getSustainedTurboCurrent(int16_t &mA) {
+    uint16_t raw = 0;
+    esp_err_t err = smbusReadWord(static_cast<uint8_t>(SbsCommand::SusTurboCurr), raw);
+    if (err == ESP_OK) mA = (int16_t)raw;
+    return err;
+}
+
+esp_err_t BQ40Z80::getTurboPackResistance(uint16_t &mOhm) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::TurboPackR), mOhm);
+}
+
+esp_err_t BQ40Z80::getTurboSysResistance(uint16_t &mOhm) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::TurboSysR), mOhm);
+}
+
+esp_err_t BQ40Z80::getTurboEdv(uint16_t &mV) {
+    return smbusReadWord(static_cast<uint8_t>(SbsCommand::TurboEdv), mV);
 }
 
 esp_err_t BQ40Z80::getCounterDecDelayOCD(uint8_t &seconds) {
@@ -476,9 +929,7 @@ esp_err_t BQ40Z80::getCounterDecDelayASCD(uint8_t &seconds) {
     return readDataFlash(0x4C02, &seconds, 1);
 }
 
-esp_err_t BQ40Z80::reset() {
-    return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::DeviceReset));
-}
+// reset() removed: read-only driver. Use the RESET button in BQStudio.
 
 esp_err_t BQ40Z80::getOperationStatus(OperationStatus &out) {
     uint8_t raw[4] = {0};
@@ -525,39 +976,25 @@ esp_err_t BQ40Z80::getOperationStatus(OperationStatus &out) {
     return ESP_OK;
 }
 
-esp_err_t BQ40Z80::toggleChargeFet() {
-    return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::ChgFetToggle));
-}
+// All FET and gauging toggles removed: read-only driver. The MAC subcommand
+// codes stay in the header enum for reference, but nothing here can send them.
 
-esp_err_t BQ40Z80::toggleDischargeFet() {
-    return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::DsgFetToggle));
-}
-
-esp_err_t BQ40Z80::togglePrechargeFet() {
-    return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::PchgFetToggle));
-}
-
-esp_err_t BQ40Z80::togglePreDischargeFet() {
-    return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::PdsgFetToggle));
-}
-
-esp_err_t BQ40Z80::toggleFuse() {
-    return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::FuseToggle));
-}
-
-esp_err_t BQ40Z80::toggleFetEnable() {
-    return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::FetControl));
-}
-
-esp_err_t BQ40Z80::toggleGaugingEnable() {
-    return manufacturerAccessSend(static_cast<uint16_t>(MfaSubcommand::Gauging));
+// SafetyAlert (0x0050) and SafetyStatus (0x0051) share a bit layout, so both go
+// through the same decode. Alert is asserted while a condition is present but
+// before its delay has elapsed, so it is the early warning that Status is about
+// to trip. Confirmed vs TRM sec 18.1.37 and 18.1.38.
+esp_err_t BQ40Z80::getSafetyAlert(SafetyStatus &out) {
+    return decodeSafetyBits(static_cast<uint16_t>(MfaSubcommand::SafetyAlert), out);
 }
 
 esp_err_t BQ40Z80::getSafetyStatus(SafetyStatus &out) {
+    return decodeSafetyBits(static_cast<uint16_t>(MfaSubcommand::SafetyStatus), out);
+}
+
+esp_err_t BQ40Z80::decodeSafetyBits(uint16_t subcommand, SafetyStatus &out) {
     uint8_t raw[4] = {0};
     uint8_t rawLen = 0;
-    esp_err_t err = manufacturerBlockRead(static_cast<uint16_t>(MfaSubcommand::SafetyStatus),
-                                           raw, rawLen, sizeof(raw));
+    esp_err_t err = manufacturerBlockRead(subcommand, raw, rawLen, sizeof(raw));
     if (err != ESP_OK) return err;
     if (rawLen < 4) return ESP_ERR_INVALID_SIZE;
 

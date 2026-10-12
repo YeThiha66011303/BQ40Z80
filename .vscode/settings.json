@@ -6,7 +6,8 @@
   ],
   "idf.currentSetup": "C:\\esp\\v6.0.2\\esp-idf",
   "idf.customExtraVars": {
-    "IDF_TARGET": "esp32s3"
+    "IDF_TARGET": "esp32s3",
+    "OPENOCD_USB_ADAPTER_LOCATION": "3-1"
   },
   "clangd.path": "C:\\Espressif\\tools\\esp-clang\\esp-20.1.1_20250829\\esp-clang\\bin\\clangd.exe",
   "clangd.arguments": [
@@ -14,6 +15,6 @@
     "--query-driver=**",
     "--compile-commands-dir=c:\\Users\\yethi\\BQ40Z80\\build"
   ],
-  "idf.flashType": "JTAG",
-  "idf.port": "COM5"
+  "idf.flashType": "UART",
+  "idf.port": "COM7"
 }
