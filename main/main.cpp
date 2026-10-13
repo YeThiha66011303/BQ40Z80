@@ -13,6 +13,7 @@
 // not alter device state. It is not a control command.
 // =============================================================================
 #include "BQ40Z80.h"
+#include "ble_server.h"
 #include "http_server.h"
 #include "telemetry.h"
 #include "wifi_ap.h"
@@ -355,6 +356,12 @@ extern "C" void app_main(void)
     }
     ESP_ERROR_CHECK(wifiApStart());
     ESP_ERROR_CHECK(httpServerStart());
+
+    // BLE after Wi-Fi: it relies on the NVS partition wifiApStart() opened.
+    // A BLE failure leaves the web dashboard running rather than halting.
+    if (bleServerStart() != ESP_OK) {
+        ESP_LOGE(TAG, "BLE failed to start -- web dashboard only");
+    }
 
     xTaskCreate(serialCommandTask, "serial_cmd", 4096, nullptr, 3, nullptr);
     ESP_LOGI(TAG, "serial commands ready -- type 'help'");
