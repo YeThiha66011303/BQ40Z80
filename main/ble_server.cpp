@@ -1,11 +1,14 @@
 // =============================================================================
-// BLE GATT server -- READ ONLY apart from the guarded reset. See ble_server.h.
+// BLE GATT server. Reads are open; the two state changes -- the guarded reset
+// and the whitelisted data flash settings -- go through CMD, which needs a
+// passkey-paired link. See ble_server.h.
 //
 // Packets are packed little-endian and written field by field, so the layout
 // does not depend on struct padding. docs/BLE_PROTOCOL.md is the reference;
 // the Flutter app reads the fields back in the same order.
 // =============================================================================
 #include "ble_server.h"
+#include "df_settings.h"
 #include "telemetry.h"
 
 #include "esp_log.h"
@@ -39,8 +42,16 @@ static const char *TAG = "ble";
 #define CMD_ERR_BAD_TOKEN   0x80   // token did not match the current reset hazard
 #define CMD_ERR_FAILED      0x81   // DeviceReset itself failed on the SMBus
 #define CMD_ERR_UNKNOWN_OP  0x82
+#define CMD_ERR_BAD_SETTING 0x83   // setting id not in the whitelist
+#define CMD_ERR_RANGE       0x84   // value outside the setting's limits
+#define CMD_ERR_CONFLICT    0x85   // would cross its threshold/recovery partner
+#define CMD_ERR_SEALED      0x86   // gauge is SEALED
+#define CMD_ERR_BUSY        0x87   // SMBus busy
+#define CMD_ERR_WRITE       0x88   // SMBus error writing data flash
+#define CMD_ERR_VERIFY      0x89   // read back a different value
 
-#define CMD_OP_RESET 0x01
+#define CMD_OP_RESET   0x01
+#define CMD_OP_SETTING 0x02
 
 // -----------------------------------------------------------------------------
 // UUIDs: 9a1b000X-5f3c-4e8a-b7d2-1c6e4f8a2b30, X = 1 service, 2..5 chars.
@@ -54,8 +65,9 @@ static const ble_uuid128_t kLiveUuid   = BMS_UUID(0x02);
 static const ble_uuid128_t kInfoUuid   = BMS_UUID(0x03);
 static const ble_uuid128_t kDetailUuid = BMS_UUID(0x04);
 static const ble_uuid128_t kCmdUuid    = BMS_UUID(0x05);
+static const ble_uuid128_t kSettingsUuid = BMS_UUID(0x06);
 
-enum Chr : int { CHR_LIVE, CHR_INFO, CHR_DETAIL, CHR_CMD };
+enum Chr : int { CHR_LIVE, CHR_INFO, CHR_DETAIL, CHR_CMD, CHR_SETTINGS };
 
 static uint16_t s_liveHandle;
 static uint8_t  s_ownAddrType;
@@ -340,10 +352,28 @@ static uint8_t s_detailBuf[DETAIL_BUF_BYTES];
 static size_t  s_detailLen;
 static int64_t s_detailAtUs;
 
+// SETTINGS reads the gauge's data flash, so it is cached the same way, and
+// also rebuilt as soon as a write lands.
+#define SETTINGS_BUF_BYTES 256
+static uint8_t  s_settingsBuf[SETTINGS_BUF_BYTES];
+static size_t   s_settingsLen;
+static int64_t  s_settingsAtUs;
+static uint32_t s_settingsGen;
+
 static int readValue(Chr which, os_mbuf *om)
 {
     int rc;
-    if (which == CHR_DETAIL) {
+    if (which == CHR_SETTINGS) {
+        const int64_t  nowUs = esp_timer_get_time();
+        const uint32_t gen   = dfSettingsGeneration();
+        if (s_settingsLen == 0 || gen != s_settingsGen || nowUs - s_settingsAtUs > 2000000) {
+            s_settingsLen  = dfSettingsBuildPacket(s_settingsBuf, sizeof(s_settingsBuf));
+            s_settingsAtUs = nowUs;
+            s_settingsGen  = gen;
+        }
+        if (s_settingsLen == 0) return BLE_ATT_ERR_UNLIKELY;
+        rc = os_mbuf_append(om, s_settingsBuf, s_settingsLen);
+    } else if (which == CHR_DETAIL) {
         const int64_t nowUs = esp_timer_get_time();
         if (s_detailLen == 0 || nowUs - s_detailAtUs > 1000000) {
             s_detailLen  = buildDetail(s_detailBuf, sizeof(s_detailBuf));
@@ -361,9 +391,28 @@ static int readValue(Chr which, os_mbuf *om)
     return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 
+static int writeSetting(const uint8_t *buf, uint16_t len)
+{
+    if (len != 6) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    const int32_t value = (int32_t)((uint32_t)buf[2] | ((uint32_t)buf[3] << 8) |
+                                    ((uint32_t)buf[4] << 16) | ((uint32_t)buf[5] << 24));
+    switch (dfSettingsWrite(buf[1], value)) {
+    case DfWriteResult::Ok:           return 0;
+    case DfWriteResult::UnknownId:    return CMD_ERR_BAD_SETTING;
+    case DfWriteResult::OutOfRange:   return CMD_ERR_RANGE;
+    case DfWriteResult::Conflict:     return CMD_ERR_CONFLICT;
+    case DfWriteResult::Sealed:       return CMD_ERR_SEALED;
+    case DfWriteResult::BusBusy:      return CMD_ERR_BUSY;
+    case DfWriteResult::WriteFailed:  return CMD_ERR_WRITE;
+    case DfWriteResult::VerifyFailed: return CMD_ERR_VERIFY;
+    }
+    return BLE_ATT_ERR_UNLIKELY;
+}
+
 // CMD payload: one opcode byte, then the argument.
 //   0x01 "CONFIRM"          DeviceReset when Mfg Status Init keeps FET_EN
 //   0x01 "CONFIRM-UNSAFE"   DeviceReset when it does not
+//   0x02 id value(i32 LE)   write one whitelisted data flash setting
 // Same token rule as POST /api/reset: a client that does not know a reset would
 // strip FET control cannot send the token that allows it.
 static int writeCmd(os_mbuf *om)
@@ -376,6 +425,7 @@ static int writeCmd(os_mbuf *om)
     }
     buf[len] = '\0';
 
+    if (buf[0] == CMD_OP_SETTING) return writeSetting(buf, len);
     if (buf[0] != CMD_OP_RESET) return CMD_ERR_UNKNOWN_OP;
 
     const char *arg   = (const char *)&buf[1];
@@ -405,7 +455,7 @@ static int accessCb(uint16_t, uint16_t, ble_gatt_access_ctxt *ctxt, void *arg)
 // NimBLE structs gain members between IDF releases, and -Wextra rejects a
 // designated initializer that leaves any of them out. The all-zero entry at
 // the end of each array is the terminator NimBLE looks for.
-static ble_gatt_chr_def s_chrs[5];
+static ble_gatt_chr_def s_chrs[6];
 static ble_gatt_svc_def s_svcs[2];
 
 static void buildGattTable()
@@ -423,6 +473,7 @@ static void buildGattTable()
     // can show the pack without pairing first.
     chr(3, kCmdUuid,    CHR_CMD,    BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC |
                                     BLE_GATT_CHR_F_WRITE_AUTHEN);
+    chr(4, kSettingsUuid, CHR_SETTINGS, BLE_GATT_CHR_F_READ);
     s_chrs[0].val_handle = &s_liveHandle;
 
     s_svcs[0].type            = BLE_GATT_SVC_TYPE_PRIMARY;

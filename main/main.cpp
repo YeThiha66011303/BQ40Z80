@@ -1,10 +1,14 @@
 // =============================================================================
-// BQ40Z80 monitor -- READ ONLY
+// BQ40Z80 monitor
 //
-// This firmware never changes the state of the gauge. It issues no FET toggles,
-// no FET_EN or GAUGE_EN changes, no data flash writes, no seal/unseal, no reset.
-// Protection and charge control belong entirely to the BQ40Z80's own firmware,
-// which is configured through BQStudio.
+// This firmware never changes the state of the gauge on its own. It issues no
+// FET toggles, no FET_EN or GAUGE_EN changes, no seal/unseal. Protection and
+// charge control belong entirely to the BQ40Z80's own firmware.
+//
+// The only state changes are user actions from the paired phone app: the
+// guarded DeviceReset, and writes to a fixed list of data flash settings with
+// range checks and read-back verification (df_settings.cpp). The web
+// dashboard stays read only.
 //
 // NOTE ON "WRITES": reading a ManufacturerAccess block (DAStatus, OperationStatus,
 // SafetyStatus, GaugingStatus, QMax, ...) requires writing the 2-byte subcommand
@@ -14,6 +18,7 @@
 // =============================================================================
 #include "BQ40Z80.h"
 #include "ble_server.h"
+#include "df_settings.h"
 #include "http_server.h"
 #include "telemetry.h"
 #include "wifi_ap.h"
@@ -344,12 +349,13 @@ extern "C" void app_main(void)
         ESP_LOGE(TAG, "begin() failed: %s", esp_err_to_name(err));
         return;
     }
-    ESP_LOGI(TAG, "BQ40Z80 monitor started (read only -- no control commands)");
+    ESP_LOGI(TAG, "BQ40Z80 monitor started (settings change only from the paired app)");
 
     // Network first. The dashboard is the main way to see what the pack is
     // doing, including the case where the pack is not answering at all, so it
     // must not sit behind a probe that can take half a minute to give up.
     telemetryInit(&gauge);
+    dfSettingsInit(&gauge);
     if (!telemetryStart()) {
         ESP_LOGE(TAG, "telemetry task failed to start -- not serving HTTP");
         return;

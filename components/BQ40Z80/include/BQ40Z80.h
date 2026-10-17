@@ -631,11 +631,13 @@ public:
     esp_err_t getGaugingStatus1(GaugingStatus1 &out); // CompRes (Cell Resistance) for cells 1-4
     esp_err_t getGaugingStatus4(GaugingStatus4 &out);
 
-    // ---- Layer 4: data flash (read only) --------------------------------------
-    // writeDataFlash removed. Configuration is written in BQStudio, where the
-    // change is visible, verifiable and revertible, rather than from firmware
-    // that would silently reapply it on every boot.
+    // ---- Layer 4: data flash ----------------------------------------------------
+    // writeDataFlash takes any address in 0x4000-0x5FFF. Application code must
+    // not call it directly: main/df_settings.cpp is the one caller, and it only
+    // writes a fixed list of settings with range checks and a read-back verify.
+    // Nothing in the firmware writes on its own -- every write is a user action.
     esp_err_t readDataFlash(uint16_t flashAddress, uint8_t *data, uint8_t len);
+    esp_err_t writeDataFlash(uint16_t flashAddress, const uint8_t *data, uint8_t len);
 
     esp_err_t getDaConfigurationNR(bool &nr, uint16_t &rawValue);
 

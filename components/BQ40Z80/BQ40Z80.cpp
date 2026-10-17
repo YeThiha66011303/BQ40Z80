@@ -311,12 +311,25 @@ esp_err_t BQ40Z80::manufacturerBlockRead(uint16_t subcommand, uint8_t *data, uin
     return smbusReadBlock(static_cast<uint8_t>(SbsCommand::ManufacturerData), data, len, maxLen);
 }
 
-// manufacturerBlockWrite and writeDataFlash removed: this driver is read-only.
-// Data flash is written in BQStudio.
-
 esp_err_t BQ40Z80::readDataFlash(uint16_t flashAddress, uint8_t *data, uint8_t len) {
     uint8_t rawLen = 0;
     return manufacturerBlockRead(flashAddress, data, rawLen, len);
+}
+
+// TRM SLUUBT5C sec 18.1.75: one SMBus block write to ManufacturerBlockAccess
+// (0x44) carrying the little-endian start address, then 1-32 bytes of data.
+// The address takes two of the block's 32 bytes, so at most 30 data bytes.
+// Needs UNSEALED or FULL ACCESS; a SEALED gauge ignores it. The caller is
+// expected to read the value back -- the gauge does not report a failed write.
+esp_err_t BQ40Z80::writeDataFlash(uint16_t flashAddress, const uint8_t *data, uint8_t len) {
+    if (len == 0 || len > 30) return ESP_ERR_INVALID_ARG;
+    if (flashAddress < 0x4000 || (uint32_t)flashAddress + len > 0x6000) return ESP_ERR_INVALID_ARG;
+
+    uint8_t block[32];
+    block[0] = (uint8_t)(flashAddress & 0xFF);
+    block[1] = (uint8_t)(flashAddress >> 8);
+    for (int i = 0; i < len; i++) block[2 + i] = data[i];
+    return smbusWriteBlock(static_cast<uint8_t>(SbsCommand::ManufacturerBlockAccess), block, len + 2);
 }
 
 esp_err_t BQ40Z80::getDaConfigurationNR(bool &nr, uint16_t &rawValue) {

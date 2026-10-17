@@ -11,6 +11,7 @@ padding. `i16[7]` means seven consecutive `i16` values.
 | INFO    | `9a1b0003-5f3c-4e8a-b7d2-1c6e4f8a2b30` | read           |
 | DETAIL  | `9a1b0004-5f3c-4e8a-b7d2-1c6e4f8a2b30` | read (long)    |
 | CMD     | `9a1b0005-5f3c-4e8a-b7d2-1c6e4f8a2b30` | write, encrypted + authenticated |
+| SETTINGS | `9a1b0006-5f3c-4e8a-b7d2-1c6e4f8a2b30` | read (long) |
 
 Every packet starts with a version byte. A client that sees a version it does
 not know must not guess at the layout.
@@ -142,7 +143,60 @@ so the first write makes the phone pair with the passkey `BLE_PASSKEY` from
 |---------|--------|
 | `01` `"CONFIRM"` | DeviceReset, accepted only while Mfg Status Init has FET_EN set |
 | `01` `"CONFIRM-UNSAFE"` | DeviceReset, accepted only while it does not |
+| `02` `id:u8` `value:i32` | Write one data flash setting (see SETTINGS) |
 
 The token rule is the same as `POST /api/reset`. Application ATT errors:
 `0x80` token did not match the current hazard, `0x81` the reset failed on the
 SMBus, `0x82` unknown opcode.
+
+Setting writes return `0x83` id not in the list, `0x84` value outside its
+limits, `0x85` value would cross its partner (a recovery level past its
+threshold, or a charging voltage at or above COV), `0x86` the gauge is SEALED,
+`0x87` SMBus busy, `0x88` SMBus error on the write, `0x89` the value read back
+did not match. A write equal to the current value succeeds without touching
+flash. For bit registers only the bits in the item's mask change; reserved bits
+keep their current value.
+
+## SETTINGS (version 1, 2 + 6 × count bytes)
+
+Read on demand. The firmware reads each value from the gauge's data flash, so a
+read takes a few hundred ms; the result is cached for 2 s and rebuilt after any
+successful write.
+
+| Type | Field |
+|------|-------|
+| u8   | version, 1 |
+| u8   | count |
+
+then `count` entries of:
+
+| Type | Field |
+|------|-------|
+| u8   | id |
+| u8   | 1 = read OK, 0 = read failed |
+| i32  | raw value as stored |
+
+Raw units: mV, mA, s, % as in BQStudio; temperatures in 0.1 K (2732 = 0.0 °C);
+bit registers as their byte value. Addresses from TRM SLUUBT5C for firmware
+4800_0_04. Limits are for LiFePO4 cells and are enforced by the firmware.
+
+| id | Setting | Address | Type | Limits |
+|----|---------|---------|------|--------|
+| 1 | Balancing Configuration | 0x4B8C | H1 | writable bits CB, CBR, CB_CHG_DOD0EW, CB_RLX_DOD0EW, CBS (mask 0x3D) |
+| 2 | Min Start Balance Delta | 0x4B93 | U1 | 1–100 mV |
+| 3 | Relax Balance Interval | 0x4B94 | U4 | 10–36000 s |
+| 4 | Min RSOC for Balancing | 0x4B98 | U1 | 0–100 % |
+| 10 / 11 | CUV Threshold / Recovery | 0x4BC2 / 0x4BC5 | I2 | 2000–3000 / 2200–3400 mV, threshold < recovery |
+| 12 | CUV Delay | 0x4BC4 | U1 | 1–30 s |
+| 13–17 | COV Threshold Low / Std Low / Std High / High / Rec Temp | 0x4BCC–0x4BD4 | I2 | 3500–3800 mV, above its recovery |
+| 18 | COV Delay | 0x4BD6 | U1 | 1–30 s |
+| 19–23 | COV Recovery, same five ranges | 0x4BD7–0x4BDF | I2 | 3300–3700 mV |
+| 30–34 | Charging Voltage, same five ranges | 0x4C9F, 0x4CA7, 0x4CAF, 0x4CB7, 0x4CBF | I2 | 3300–3650 mV, below that range's COV |
+| 35 | Charge Term Taper Current | 0x4CF3 | I2 | 50–5000 mA |
+| 40 / 41 | OTC Threshold / Recovery | 0x4C05 / 0x4C08 | I2 | 30–60 / 25–55 °C, threshold > recovery |
+| 42 / 43 | OTD Threshold / Recovery | 0x4C0A / 0x4C0D | I2 | 40–75 / 30–70 °C |
+| 44 / 45 | UTC Threshold / Recovery | 0x4C14 / 0x4C17 | I2 | −10–15 / −5–20 °C, threshold < recovery |
+| 46 / 47 | UTD Threshold / Recovery | 0x4C19 / 0x4C1C | I2 | −30–10 / −25–15 °C |
+| 50–53 | Enabled Protections A–D | 0x4BBE–0x4BC1 | H1 | masks 0xBF, 0x7B, 0xD7, 0x3F |
+
+IDs are fixed: new settings get new IDs, existing ones are never renumbered.

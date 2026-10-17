@@ -1,16 +1,17 @@
 #pragma once
 // =============================================================================
-// BLE GATT server -- the same read-only view the HTTP dashboard gives, for the
+// BLE GATT server -- the view the HTTP dashboard gives, plus settings, for the
 // phone app. See docs/BLE_PROTOCOL.md for the byte layouts.
 //
-// One custom service, four characteristics:
-//   LIVE    read / notify   fast-tier snapshot, pushed once a second
-//   INFO    read            static identity, read once after connecting
-//   DETAIL  read            slow-tier Impedance Track and lifetime data
-//   CMD     write           DeviceReset, behind pairing and a confirm token
+// One custom service, five characteristics:
+//   LIVE     read / notify  fast-tier snapshot, pushed once a second
+//   INFO     read           static identity, read once after connecting
+//   DETAIL   read           slow-tier Impedance Track and lifetime data
+//   CMD      write          DeviceReset or one data flash setting, behind pairing
+//   SETTINGS read           current values of the writable data flash settings
 //
-// Like http_server, nothing here talks to the gauge. Everything is built from
-// the telemetry snapshot; the only state change is telemetryRequestReset().
+// LIVE, INFO and DETAIL come from the telemetry snapshot. SETTINGS and the
+// setting writes go through df_settings, which takes the SMBus lock.
 // =============================================================================
 #include "esp_err.h"
 
