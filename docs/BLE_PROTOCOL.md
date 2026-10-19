@@ -121,7 +121,7 @@ the same snapshot.
 | u32  | State Time s |
 | i16 × 15 | DOD0 Passed Q, DOD0 Passed E, DOD0 Time, QMax Passed Q, QMax Time, Temp K, Temp A, True Rem Q, True Rem E, Initial Q, Initial E, True FCC Q, True FCC E, T_sim, T_ambient |
 | i16 × 4 | Filtered: Rem Q mAh, Rem E mWh, FCC Q mAh, FCC E mWh |
-| i16[7] | balance time s |
+| i16[7] | balance time s (really u16: mask with 0xFFFF, or 65007 s reads as −529) |
 | i16[7] | balance DOD |
 | i16  | total DOD charge |
 | i16[7] | lifetime cell max mV |
@@ -186,6 +186,9 @@ bit registers as their byte value. Addresses from TRM SLUUBT5C for firmware
 | 2 | Min Start Balance Delta | 0x4B93 | U1 | 1–100 mV |
 | 3 | Relax Balance Interval | 0x4B94 | U4 | 10–36000 s |
 | 4 | Min RSOC for Balancing | 0x4B98 | U1 | 0–100 % |
+| 5 / 6 / 7 | Bal Time/mAh Cell 1 / Cell 2-6 / Cell 7 | 0x4B8D / 0x4B8F / 0x4B91 | U2 | 50–5000 s/mAh |
+| 8 / 9 | Start / End RSOC for Bal in Sleep | 0x4B99 / 0x4B9A | U1 | 0–100 %, start above end |
+| 60 | Start Time for Bal in Sleep | 0x4B9B | U2 | 0–65520 h |
 | 10 / 11 | CUV Threshold / Recovery | 0x4BC2 / 0x4BC5 | I2 | 2000–3000 / 2200–3400 mV, threshold < recovery |
 | 12 | CUV Delay | 0x4BC4 | U1 | 1–30 s |
 | 13–17 | COV Threshold Low / Std Low / Std High / High / Rec Temp | 0x4BCC–0x4BD4 | I2 | 3500–3800 mV, above its recovery |

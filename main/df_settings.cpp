@@ -12,13 +12,13 @@ static const char *TAG = "df_settings";
 
 namespace {
 
-enum class T : uint8_t { U1, H1, I2, U4 };   // TRM data types
+enum class T : uint8_t { U1, H1, I2, U2, U4 };   // TRM data types
 
 uint8_t sizeOf(T t)
 {
     switch (t) {
     case T::U1: case T::H1: return 1;
-    case T::I2:             return 2;
+    case T::I2: case T::U2: return 2;
     case T::U4:             return 4;
     }
     return 0;
@@ -47,6 +47,14 @@ constexpr Item kItems[] = {
     { 2, 0x4B93, T::U1, 1, 100,  0, 0, 0 },          // Min Start Balance Delta, mV
     { 3, 0x4B94, T::U4, 10, 36000, 0, 0, 0 },        // Relax Balance Interval, s
     { 4, 0x4B98, T::U1, 0, 100,  0, 0, 0 },          // Min RSOC for Balancing, %
+    // Bal Time/mAh is the seconds of bypass per mAh moved: it follows from the
+    // balancing resistor, so only change it if that resistor changes.
+    { 5, 0x4B8D, T::U2, 50, 5000, 0, 0, 0 },         // Bal Time/mAh Cell 1, s/mAh
+    { 6, 0x4B8F, T::U2, 50, 5000, 0, 0, 0 },         // Bal Time/mAh Cell 2-6
+    { 7, 0x4B91, T::U2, 50, 5000, 0, 0, 0 },         // Bal Time/mAh Cell 7
+    { 8, 0x4B99, T::U1, 0, 100, 0, 9, +1 },          // Start RSOC for Bal in Sleep, above End
+    { 9, 0x4B9A, T::U1, 0, 100, 0, 8, -1 },          // End RSOC for Bal in Sleep
+    { 60, 0x4B9B, T::U2, 0, 65520, 0, 0, 0 },        // Start Time for Bal in Sleep, h
 
     // ---- Cell undervoltage ------------------------------------------------
     { 10, 0x4BC2, T::I2, 2000, 3000, 0, 11, -1 },    // CUV Threshold, below Recovery
@@ -109,6 +117,7 @@ int32_t decode(T type, const uint8_t *b)
     switch (type) {
     case T::U1: case T::H1: return b[0];
     case T::I2:             return (int16_t)(b[0] | (b[1] << 8));
+    case T::U2:             return (uint16_t)(b[0] | (b[1] << 8));
     case T::U4:             return (int32_t)((uint32_t)b[0] | ((uint32_t)b[1] << 8) |
                                              ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24));
     }

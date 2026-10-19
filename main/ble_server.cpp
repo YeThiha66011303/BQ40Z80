@@ -354,7 +354,7 @@ static int64_t s_detailAtUs;
 
 // SETTINGS reads the gauge's data flash, so it is cached the same way, and
 // also rebuilt as soon as a write lands.
-#define SETTINGS_BUF_BYTES 256
+#define SETTINGS_BUF_BYTES 512   // ATT maximum; 42 settings use 254
 static uint8_t  s_settingsBuf[SETTINGS_BUF_BYTES];
 static size_t   s_settingsLen;
 static int64_t  s_settingsAtUs;

@@ -497,7 +497,9 @@ function renderIT(d){
   ]));
 
   h += cellTable("Cell Balancing", [
-    ["Bal Time (s)", c.time],
+    // u16 on the gauge; the snapshot carries it as i16, so 65007 s arrives
+    // as -529 without the mask.
+    ["Bal Time (s)", c.time.map(v => v & 0xFFFF)],
     ["Bal DOD",      c.dod]
   ], 7);
 
