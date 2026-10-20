@@ -52,6 +52,7 @@ static const char *TAG = "ble";
 
 #define CMD_OP_RESET   0x01
 #define CMD_OP_SETTING 0x02
+#define CMD_OP_DF_WRITE 0x03
 
 // -----------------------------------------------------------------------------
 // UUIDs: 9a1b000X-5f3c-4e8a-b7d2-1c6e4f8a2b30, X = 1 service, 2..5 chars.
@@ -66,8 +67,9 @@ static const ble_uuid128_t kInfoUuid   = BMS_UUID(0x03);
 static const ble_uuid128_t kDetailUuid = BMS_UUID(0x04);
 static const ble_uuid128_t kCmdUuid    = BMS_UUID(0x05);
 static const ble_uuid128_t kSettingsUuid = BMS_UUID(0x06);
+static const ble_uuid128_t kDfReadUuid   = BMS_UUID(0x07);
 
-enum Chr : int { CHR_LIVE, CHR_INFO, CHR_DETAIL, CHR_CMD, CHR_SETTINGS };
+enum Chr : int { CHR_LIVE, CHR_INFO, CHR_DETAIL, CHR_CMD, CHR_SETTINGS, CHR_DFREAD };
 
 static uint16_t s_liveHandle;
 static uint8_t  s_ownAddrType;
@@ -360,10 +362,41 @@ static size_t   s_settingsLen;
 static int64_t  s_settingsAtUs;
 static uint32_t s_settingsGen;
 
+// DFREAD: the client writes the range it wants, then reads it. The bytes are
+// fetched once, on the write, so the Read Blob pieces of one long read all
+// come from the same snapshot.
+#define DFREAD_VERSION 1
+static uint8_t s_dfBuf[5 + DF_READ_MAX];
+static size_t  s_dfLen;
+
+static int writeDfRead(os_mbuf *om)
+{
+    uint8_t  req[4];
+    uint16_t len = 0;
+    if (OS_MBUF_PKTLEN(om) != sizeof(req) ||
+        ble_hs_mbuf_to_flat(om, req, sizeof(req), &len) != 0) {
+        return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    }
+    const uint16_t addr = req[0] | (req[1] << 8);
+    const uint16_t n    = req[2] | (req[3] << 8);
+    s_dfLen = 0;
+    if (!dfReadRaw(addr, n, &s_dfBuf[5])) return BLE_ATT_ERR_UNLIKELY;
+    s_dfBuf[0] = DFREAD_VERSION;
+    s_dfBuf[1] = req[0];
+    s_dfBuf[2] = req[1];
+    s_dfBuf[3] = req[2];
+    s_dfBuf[4] = req[3];
+    s_dfLen = 5 + n;
+    return 0;
+}
+
 static int readValue(Chr which, os_mbuf *om)
 {
     int rc;
-    if (which == CHR_SETTINGS) {
+    if (which == CHR_DFREAD) {
+        if (s_dfLen == 0) return BLE_ATT_ERR_UNLIKELY;
+        rc = os_mbuf_append(om, s_dfBuf, s_dfLen);
+    } else if (which == CHR_SETTINGS) {
         const int64_t  nowUs = esp_timer_get_time();
         const uint32_t gen   = dfSettingsGeneration();
         if (s_settingsLen == 0 || gen != s_settingsGen || nowUs - s_settingsAtUs > 2000000) {
@@ -391,12 +424,19 @@ static int readValue(Chr which, os_mbuf *om)
     return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 
+static int cmdResult(DfWriteResult r);
+
 static int writeSetting(const uint8_t *buf, uint16_t len)
 {
     if (len != 6) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     const int32_t value = (int32_t)((uint32_t)buf[2] | ((uint32_t)buf[3] << 8) |
                                     ((uint32_t)buf[4] << 16) | ((uint32_t)buf[5] << 24));
-    switch (dfSettingsWrite(buf[1], value)) {
+    return cmdResult(dfSettingsWrite(buf[1], value));
+}
+
+static int cmdResult(DfWriteResult r)
+{
+    switch (r) {
     case DfWriteResult::Ok:           return 0;
     case DfWriteResult::UnknownId:    return CMD_ERR_BAD_SETTING;
     case DfWriteResult::OutOfRange:   return CMD_ERR_RANGE;
@@ -409,10 +449,20 @@ static int writeSetting(const uint8_t *buf, uint16_t len)
     return BLE_ATT_ERR_UNLIKELY;
 }
 
+static int writeDf(const uint8_t *buf, uint16_t len)
+{
+    if (len != 7) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    const uint16_t addr  = buf[1] | (buf[2] << 8);
+    const int32_t  value = (int32_t)((uint32_t)buf[3] | ((uint32_t)buf[4] << 8) |
+                                     ((uint32_t)buf[5] << 16) | ((uint32_t)buf[6] << 24));
+    return cmdResult(dfWriteAddress(addr, value));
+}
+
 // CMD payload: one opcode byte, then the argument.
 //   0x01 "CONFIRM"          DeviceReset when Mfg Status Init keeps FET_EN
 //   0x01 "CONFIRM-UNSAFE"   DeviceReset when it does not
-//   0x02 id value(i32 LE)   write one whitelisted data flash setting
+//   0x02 id value(i32 LE)   write one curated data flash setting
+//   0x03 addr(u16) value(i32) write any catalog parameter by address
 // Same token rule as POST /api/reset: a client that does not know a reset would
 // strip FET control cannot send the token that allows it.
 static int writeCmd(os_mbuf *om)
@@ -426,6 +476,7 @@ static int writeCmd(os_mbuf *om)
     buf[len] = '\0';
 
     if (buf[0] == CMD_OP_SETTING) return writeSetting(buf, len);
+    if (buf[0] == CMD_OP_DF_WRITE) return writeDf(buf, len);
     if (buf[0] != CMD_OP_RESET) return CMD_ERR_UNKNOWN_OP;
 
     const char *arg   = (const char *)&buf[1];
@@ -445,7 +496,9 @@ static int accessCb(uint16_t, uint16_t, ble_gatt_access_ctxt *ctxt, void *arg)
     case BLE_GATT_ACCESS_OP_READ_CHR:
         return readValue(which, ctxt->om);
     case BLE_GATT_ACCESS_OP_WRITE_CHR:
-        return (which == CHR_CMD) ? writeCmd(ctxt->om) : BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+        if (which == CHR_CMD)    return writeCmd(ctxt->om);
+        if (which == CHR_DFREAD) return writeDfRead(ctxt->om);
+        return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
     default:
         return BLE_ATT_ERR_UNLIKELY;
     }
@@ -455,7 +508,7 @@ static int accessCb(uint16_t, uint16_t, ble_gatt_access_ctxt *ctxt, void *arg)
 // NimBLE structs gain members between IDF releases, and -Wextra rejects a
 // designated initializer that leaves any of them out. The all-zero entry at
 // the end of each array is the terminator NimBLE looks for.
-static ble_gatt_chr_def s_chrs[6];
+static ble_gatt_chr_def s_chrs[7];
 static ble_gatt_svc_def s_svcs[2];
 
 static void buildGattTable()
@@ -474,6 +527,9 @@ static void buildGattTable()
     chr(3, kCmdUuid,    CHR_CMD,    BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC |
                                     BLE_GATT_CHR_F_WRITE_AUTHEN);
     chr(4, kSettingsUuid, CHR_SETTINGS, BLE_GATT_CHR_F_READ);
+    // Selecting a range to read changes nothing on the gauge, so it needs no
+    // pairing -- only writes through CMD do.
+    chr(5, kDfReadUuid,   CHR_DFREAD,   BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE);
     s_chrs[0].val_handle = &s_liveHandle;
 
     s_svcs[0].type            = BLE_GATT_SVC_TYPE_PRIMARY;

@@ -2,6 +2,7 @@
 // Data flash settings -- see df_settings.h.
 // =============================================================================
 #include "df_settings.h"
+#include "df_catalog.h"
 #include "telemetry.h"
 
 #include "esp_log.h"
@@ -12,14 +13,14 @@ static const char *TAG = "df_settings";
 
 namespace {
 
-enum class T : uint8_t { U1, H1, I2, U2, U4 };   // TRM data types
+using T = DfType;
 
 uint8_t sizeOf(T t)
 {
     switch (t) {
-    case T::U1: case T::H1: return 1;
-    case T::I2: case T::U2: return 2;
-    case T::U4:             return 4;
+    case T::U1: case T::I1: case T::H1: return 1;
+    case T::U2: case T::I2: case T::H2: return 2;
+    case T::U4: case T::I4: case T::H4: return 4;
     }
     return 0;
 }
@@ -112,16 +113,34 @@ const Item *find(uint8_t id)
     return nullptr;
 }
 
+const Item *findByAddr(uint16_t addr)
+{
+    for (const Item &it : kItems) {
+        if (it.addr == addr) return &it;
+    }
+    return nullptr;
+}
+
+const DfParam *findWritable(uint16_t addr)
+{
+    size_t lo = 0, hi = sizeof(kDfWritable) / sizeof(kDfWritable[0]);
+    while (lo < hi) {
+        const size_t mid = (lo + hi) / 2;
+        if (kDfWritable[mid].addr == addr) return &kDfWritable[mid];
+        if (kDfWritable[mid].addr < addr) lo = mid + 1; else hi = mid;
+    }
+    return nullptr;
+}
+
 int32_t decode(T type, const uint8_t *b)
 {
+    uint32_t u = 0;
+    for (int i = sizeOf(type) - 1; i >= 0; i--) u = (u << 8) | b[i];
     switch (type) {
-    case T::U1: case T::H1: return b[0];
-    case T::I2:             return (int16_t)(b[0] | (b[1] << 8));
-    case T::U2:             return (uint16_t)(b[0] | (b[1] << 8));
-    case T::U4:             return (int32_t)((uint32_t)b[0] | ((uint32_t)b[1] << 8) |
-                                             ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24));
+    case T::I1: return (int8_t)u;
+    case T::I2: return (int16_t)u;
+    default:    return (int32_t)u;
     }
-    return 0;
 }
 
 void encode(T type, int32_t v, uint8_t *b)
@@ -130,11 +149,11 @@ void encode(T type, int32_t v, uint8_t *b)
 }
 
 // Bus lock must be held.
-esp_err_t readItem(const Item &it, int32_t &out)
+esp_err_t readValue(uint16_t addr, T type, int32_t &out)
 {
     uint8_t b[4] = {0};
-    esp_err_t err = s_gauge->readDataFlash(it.addr, b, sizeOf(it.type));
-    if (err == ESP_OK) out = decode(it.type, b);
+    esp_err_t err = s_gauge->readDataFlash(addr, b, sizeOf(type));
+    if (err == ESP_OK) out = decode(type, b);
     return err;
 }
 
@@ -143,6 +162,30 @@ bool isSealed()
     Telemetry t;
     telemetryGet(t);
     return ((t.op.raw >> 8) & 0x3) == 3;   // OperationStatus SEC1:SEC0
+}
+
+// Bus lock must be held. Writes, then reads back until it matches.
+DfWriteResult writeVerify(uint16_t addr, T type, int32_t value)
+{
+    uint8_t b[4];
+    encode(type, value, b);
+    if (s_gauge->writeDataFlash(addr, b, sizeOf(type)) != ESP_OK) return DfWriteResult::WriteFailed;
+    // The flash write completes inside the gauge after the SMBus transaction
+    // ends; give it time before reading back.
+    for (int attempt = 0; attempt < 3; attempt++) {
+        vTaskDelay(pdMS_TO_TICKS(attempt == 0 ? 100 : 50));
+        int32_t back = 0;
+        if (readValue(addr, type, back) == ESP_OK && back == value) return DfWriteResult::Ok;
+    }
+    return DfWriteResult::VerifyFailed;
+}
+
+void afterWrite(uint16_t addr, int32_t from, int32_t to)
+{
+    s_generation = s_generation + 1;
+    ESP_LOGW(TAG, "data flash 0x%04X: %ld -> %ld", addr, (long)from, (long)to);
+    // INFO carries Enabled Protections C.
+    if (addr == 0x4BC0) telemetryReadStatic();
 }
 
 } // namespace
@@ -168,7 +211,7 @@ size_t dfSettingsBuildPacket(uint8_t *buf, size_t cap)
     buf[n++] = (uint8_t)kCount;
     for (const Item &it : kItems) {
         int32_t v = 0;
-        const bool ok = readItem(it, v) == ESP_OK;
+        const bool ok = readValue(it.addr, it.type, v) == ESP_OK;
         buf[n++] = it.id;
         buf[n++] = ok ? 1 : 0;
         for (int i = 0; i < 4; i++) buf[n++] = (uint8_t)((uint32_t)v >> (8 * i));
@@ -189,7 +232,8 @@ DfWriteResult dfSettingsWrite(uint8_t id, int32_t value)
     int32_t current = 0, partner = 0;
     const Item *p = it->partner ? find(it->partner) : nullptr;
 
-    if (readItem(*it, current) != ESP_OK || (p && readItem(*p, partner) != ESP_OK)) {
+    if (readValue(it->addr, it->type, current) != ESP_OK ||
+        (p && readValue(p->addr, p->type, partner) != ESP_OK)) {
         result = DfWriteResult::WriteFailed;
     } else {
         if (it->type == T::H1) value = (current & ~it->mask) | (value & it->mask);
@@ -197,35 +241,62 @@ DfWriteResult dfSettingsWrite(uint8_t id, int32_t value)
         if (p && ((it->order > 0 && value <= partner) || (it->order < 0 && value >= partner))) {
             result = DfWriteResult::Conflict;
         } else if (value != current) {
-            uint8_t b[4];
-            encode(it->type, value, b);
-            if (s_gauge->writeDataFlash(it->addr, b, sizeOf(it->type)) != ESP_OK) {
-                result = DfWriteResult::WriteFailed;
-            } else {
-                // The flash write completes inside the gauge after the SMBus
-                // transaction ends; give it time before reading back.
-                result = DfWriteResult::VerifyFailed;
-                for (int attempt = 0; attempt < 3; attempt++) {
-                    vTaskDelay(pdMS_TO_TICKS(attempt == 0 ? 100 : 50));
-                    int32_t back = 0;
-                    if (readItem(*it, back) == ESP_OK && back == value) {
-                        result = DfWriteResult::Ok;
-                        break;
-                    }
-                }
-            }
+            result = writeVerify(it->addr, it->type, value);
         }
     }
     telemetryUnlockBus();
 
     if (result == DfWriteResult::Ok && value != current) {
-        s_generation = s_generation + 1;
-        ESP_LOGW(TAG, "data flash 0x%04X (setting %u): %ld -> %ld",
-                 it->addr, id, (long)current, (long)value);
-        // INFO carries Enabled Protections C and Mfg Status Init.
-        if (it->addr == 0x4BC0) telemetryReadStatic();
+        afterWrite(it->addr, current, value);
     } else if (result != DfWriteResult::Ok) {
         ESP_LOGE(TAG, "setting %u -> %ld rejected (%d)", id, (long)value, (int)result);
     }
     return result;
+}
+
+DfWriteResult dfWriteAddress(uint16_t addr, int32_t value)
+{
+    // The hand-picked settings keep their tighter limits, masks and pairing.
+    if (const Item *it = findByAddr(addr)) return dfSettingsWrite(it->id, value);
+
+    const DfParam *p = findWritable(addr);
+    if (!p || !s_gauge) return DfWriteResult::UnknownId;
+    if (value < p->min || value > p->max) return DfWriteResult::OutOfRange;
+    if (isSealed()) return DfWriteResult::Sealed;
+    if (!telemetryLockBus(3000)) return DfWriteResult::BusBusy;
+
+    int32_t current = 0;
+    DfWriteResult result = DfWriteResult::Ok;
+    if (readValue(addr, p->type, current) != ESP_OK) {
+        result = DfWriteResult::WriteFailed;
+    } else if (value != current) {
+        result = writeVerify(addr, p->type, value);
+    }
+    telemetryUnlockBus();
+
+    if (result == DfWriteResult::Ok && value != current) {
+        afterWrite(addr, current, value);
+    } else if (result != DfWriteResult::Ok) {
+        ESP_LOGE(TAG, "0x%04X -> %ld rejected (%d)", addr, (long)value, (int)result);
+    }
+    return result;
+}
+
+bool dfReadRaw(uint16_t addr, uint16_t len, uint8_t *out)
+{
+    if (!s_gauge || len == 0 || len > DF_READ_MAX) return false;
+    if (addr < 0x4000 || (uint32_t)addr + len > 0x6000) return false;
+    if (!telemetryLockBus(1500)) return false;
+
+    bool ok = true;
+    for (uint16_t off = 0; ok && off < len; off += 32) {
+        uint8_t block[32];
+        uint8_t got = 0;
+        ok = s_gauge->manufacturerBlockRead(addr + off, block, got, sizeof(block)) == ESP_OK;
+        const uint16_t want = (len - off < 32) ? (len - off) : 32;
+        ok = ok && got >= want;
+        for (uint16_t i = 0; ok && i < want; i++) out[off + i] = block[i];
+    }
+    telemetryUnlockBus();
+    return ok;
 }

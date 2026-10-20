@@ -12,6 +12,7 @@ padding. `i16[7]` means seven consecutive `i16` values.
 | DETAIL  | `9a1b0004-5f3c-4e8a-b7d2-1c6e4f8a2b30` | read (long)    |
 | CMD     | `9a1b0005-5f3c-4e8a-b7d2-1c6e4f8a2b30` | write, encrypted + authenticated |
 | SETTINGS | `9a1b0006-5f3c-4e8a-b7d2-1c6e4f8a2b30` | read (long) |
+| DFREAD  | `9a1b0007-5f3c-4e8a-b7d2-1c6e4f8a2b30` | write, then read (long) |
 
 Every packet starts with a version byte. A client that sees a version it does
 not know must not guess at the layout.
@@ -143,13 +144,14 @@ so the first write makes the phone pair with the passkey `BLE_PASSKEY` from
 |---------|--------|
 | `01` `"CONFIRM"` | DeviceReset, accepted only while Mfg Status Init has FET_EN set |
 | `01` `"CONFIRM-UNSAFE"` | DeviceReset, accepted only while it does not |
-| `02` `id:u8` `value:i32` | Write one data flash setting (see SETTINGS) |
+| `02` `id:u8` `value:i32` | Write one curated data flash setting (see SETTINGS) |
+| `03` `addr:u16` `value:i32` | Write any data flash parameter by address (see DFREAD) |
 
 The token rule is the same as `POST /api/reset`. Application ATT errors:
 `0x80` token did not match the current hazard, `0x81` the reset failed on the
 SMBus, `0x82` unknown opcode.
 
-Setting writes return `0x83` id not in the list, `0x84` value outside its
+Setting writes return `0x83` id or address not writable from the app, `0x84` value outside its
 limits, `0x85` value would cross its partner (a recovery level past its
 threshold, or a charging voltage at or above COV), `0x86` the gauge is SEALED,
 `0x87` SMBus busy, `0x88` SMBus error on the write, `0x89` the value read back
@@ -203,3 +205,32 @@ bit registers as their byte value. Addresses from TRM SLUUBT5C for firmware
 | 50–53 | Enabled Protections A–D | 0x4BBE–0x4BC1 | H1 | masks 0xBF, 0x7B, 0xD7, 0x3F |
 
 IDs are fixed: new settings get new IDs, existing ones are never renumbered.
+
+
+## DFREAD (version 1)
+
+Raw data flash for the app to decode with its catalog (`hero_bms`
+`lib/ble/df_catalog.dart`, generated with the firmware's own list by
+`tools/gen_df_catalog.py` from `docs/df_table_4800_0_04.json`, which is TI
+SLUUBT5C Table 19-1).
+
+Write 4 bytes, `addr:u16` `len:u16` (address 0x4000–0x5FFF, 1–480 bytes); the
+firmware reads the range from the gauge before the write completes. Then read:
+
+| Type | Field |
+|------|-------|
+| u8   | version, 1 |
+| u16  | address |
+| u16  | length |
+| u8[length] | data flash bytes, little-endian as stored |
+
+Selecting a range changes nothing on the gauge, so DFREAD needs no pairing.
+
+`CMD 03` writes one parameter: the firmware looks the address up in
+`main/df_catalog.h` (366 of the 999 parameters), checks TI's min/max, writes
+it and reads it back. Addresses of the curated SETTINGS items keep their
+tighter rules. Read only, by policy in the generator: Calibration, System
+Data, Ra Table, Black Box, Lifetimes, PF Status, Settings SMBus / Fuse /
+Permanent Failure / Manufacturing / Current Scaling, Gas Gauging State, Cell
+Configuration, Pin Configuration, IO Config, GPIO Sealed Access Config,
+FlagMapSetUp0–7, strings and floats.
