@@ -1,0 +1,2187 @@
+{
+ "0x4AC7": [
+  {
+   "name": "RSVD",
+   "lo": 9,
+   "width": 7,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "PDSG",
+   "lo": 8,
+   "width": 1,
+   "desc": "PRE-DISCHARGE mode is enabled",
+   "values": [
+    "1 = Enable",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "PACK_FUSE",
+   "lo": 7,
+   "width": 1,
+   "desc": "Source of voltage to check for Min Blow Fuse Voltage",
+   "values": [
+    "1 = PACK voltage",
+    "0 = Battery stack voltage"
+   ]
+  },
+  {
+   "name": "SLEEPCHG",
+   "lo": 6,
+   "width": 1,
+   "desc": "CHG FET enabled during sleep",
+   "values": [
+    "1 = CHG FET remains on during sleep.",
+    "0 = CHG FET remains off during sleep (default)."
+   ]
+  },
+  {
+   "name": "CHGFET",
+   "lo": 5,
+   "width": 1,
+   "desc": "FET action on setting of GaugingStatus()[TC]",
+   "values": [
+    "1 = Charging and Precharging disabled, FET off",
+    "0 = FET active (default)"
+   ]
+  },
+  {
+   "name": "CHGIN",
+   "lo": 4,
+   "width": 1,
+   "desc": "FET action in CHARGE INHIBIT mode",
+   "values": [
+    "1 = Charging and precharging disabled, FETs off",
+    "0 = FET active (default)"
+   ]
+  },
+  {
+   "name": "CHGSU",
+   "lo": 3,
+   "width": 1,
+   "desc": "FET action in CHARGE SUSPEND mode",
+   "values": [
+    "1 = Charging and precharging disabled, FETs off",
+    "0 = FET active (default)"
+   ]
+  },
+  {
+   "name": "OTFET",
+   "lo": 2,
+   "width": 1,
+   "desc": "FET action in OVERTEMPERATURE mode",
+   "values": [
+    "1 = CHG and DSG FETs will be turned off for overtemperature conditions",
+    "0 = No FET action for overtemperature condition (default)"
+   ]
+  },
+  {
+   "name": "PARALLEL_FETS",
+   "lo": 1,
+   "width": 1,
+   "desc": "Series or Parallel circuit configuration for FETs",
+   "values": [
+    "1 = Parallel FET configuration",
+    "0 = Series FET configuration (default)"
+   ]
+  },
+  {
+   "name": "PCHG_COMM",
+   "lo": 0,
+   "width": 1,
+   "desc": "Precharge FET selection",
+   "values": [
+    "1 = CHG FET",
+    "0 = PCHG FET (default)"
+   ]
+  }
+ ],
+ "0x4AC9": [
+  {
+   "name": "RSVD",
+   "lo": 4,
+   "width": 4,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "RSOC_RND_OFF",
+   "lo": 3,
+   "width": 1,
+   "desc": "Enables a round-off option of RSOC (instead of a ceiling function available by default)",
+   "values": [
+    "1 = Enables RSOC round-off",
+    "0 = Disables RSOC round-off (A ceiling function is used instead.)"
+   ]
+  },
+  {
+   "name": "LOCK0",
+   "lo": 2,
+   "width": 1,
+   "desc": "Keep RemainingCapacity() and RelativeStateOfCharge() jumping back during relaxation after 0 was reached during discharge",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "RSOC_HOLD",
+   "lo": 1,
+   "width": 1,
+   "desc": "Prevent RSOC from increasing during discharge",
+   "values": [
+    "1 = RSOC not allowed to increase during discharge",
+    "0 = RSOC not limited (default)"
+   ]
+  },
+  {
+   "name": "RSOCL",
+   "lo": 0,
+   "width": 1,
+   "desc": "RelativeStateOfCharge() and RemainingCapacity() behavior at end of charge",
+   "values": [
+    "1 = Held at 99% until valid charge termination. On entering valid charge termination update to 100%",
+    "0 = Actual value shown (default)"
+   ]
+  }
+ ],
+ "0x4ACA": [
+  {
+   "name": "FLASH_BUSY_WAIT",
+   "lo": 7,
+   "width": 1,
+   "desc": "This allows the clock stretching during a flash program or erase operation",
+   "values": [
+    "1 = The BQ40Z80 device will clock stretch (up to the timeout for SMBus devices) during flash operations.",
+    "0 = The BQ40Z80 device will NACK any SMBus engine interrupt that occurs during a flash operation (program or erase). Note: There is some potential for read errors with this bit. For example, when the master is reading data from the device, there is no NACK from the gauge; therefore, the \"NACK\" in the hardware releases the bus without writing new data to the SMBDA register, which means the read is whatever is present at the time. PECs should catch this error."
+   ]
+  },
+  {
+   "name": "SMB_CELL_TEMP",
+   "lo": 6,
+   "width": 1,
+   "desc": "Enables the host to write the temperature register via MAC command WriteTemp(). This enables bypassing the gauge’s cell temperature inputs (TS1...TS4)",
+   "values": [
+    "1 = Host can set the temperature (and bypass TS1...TS4).",
+    "0 = Host cannot set the temperature (temperature is set by the gauge's thermistors)."
+   ]
+  },
+  {
+   "name": "BLT1",
+   "lo": 5,
+   "width": 1,
+   "desc": "Bus low timeout",
+   "values": [
+    "0,0 = No SBS bus low timeout",
+    "0,1 = 1-s SBS bus low timeout",
+    "1,0 = 2-s SBS bus low timeout (default)",
+    "1,1 = 3-s SBS bus low timeout"
+   ]
+  },
+  {
+   "name": "BLT0",
+   "lo": 4,
+   "width": 1,
+   "desc": "Bus low timeout",
+   "values": [
+    "0,0 = No SBS bus low timeout",
+    "0,1 = 1-s SBS bus low timeout",
+    "1,0 = 2-s SBS bus low timeout (default)",
+    "1,1 = 3-s SBS bus low timeout"
+   ]
+  },
+  {
+   "name": "XL",
+   "lo": 3,
+   "width": 1,
+   "desc": "Enables 400-kHz COM mode",
+   "values": [
+    "1 = 400-kHz bus speed",
+    "0 = Normal SBS bus speed (default)"
+   ]
+  },
+  {
+   "name": "HPE",
+   "lo": 2,
+   "width": 1,
+   "desc": "PEC on host communication",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "CPE",
+   "lo": 1,
+   "width": 1,
+   "desc": "PEC on charger broadcast",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "BCAST",
+   "lo": 0,
+   "width": 1,
+   "desc": "Enables alert and charging broadcast from device to host",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  }
+ ],
+ "0x4ACB": [
+  {
+   "name": "RSVD",
+   "lo": 3,
+   "width": 5,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "SHA1_SECURE",
+   "lo": 2,
+   "width": 1,
+   "desc": "Enables secure memory usage for encryption key storage",
+   "values": [
+    "1 = Enables secure memory usage",
+    "0 = Enables secure memory usage"
+   ]
+  },
+  {
+   "name": "SPLIT_RESPONSE",
+   "lo": 1,
+   "width": 1,
+   "desc": "42 bytes ECC response is returned in a single block or 2 blocks",
+   "values": [
+    "1 = Response is split into two blocks: first block is 31 bytes and second block is 11 bytes.",
+    "0 = Response is single block of 42 bytes."
+   ]
+  },
+  {
+   "name": "LEGACY_SHA1",
+   "lo": 0,
+   "width": 1,
+   "desc": "ECC or SHA-1 authentication is enabled",
+   "values": [
+    "1 = Enables SHA-1 authentication",
+    "0 = Enables ECC authentication"
+   ]
+  }
+ ],
+ "0x4ACC": [
+  {
+   "name": "RSVD",
+   "lo": 10,
+   "width": 6,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "SLEEPWKCHG",
+   "lo": 9,
+   "width": 1,
+   "desc": "Enables the sleep wake charge feature",
+   "values": [
+    "1 = Enables sleep wake charge feature",
+    "0 = Disables sleep wake charge feature"
+   ]
+  },
+  {
+   "name": "SLP_ACCUM",
+   "lo": 8,
+   "width": 1,
+   "desc": "Enables charge accumulation while in SLEEP mode",
+   "values": [
+    "1 = Enables charge accumulation in SLEEP mode",
+    "0 = Disables charge accumulation in SLEEP mode"
+   ]
+  },
+  {
+   "name": "RSVD",
+   "lo": 6,
+   "width": 2,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "CHECK_WAKE_FET",
+   "lo": 5,
+   "width": 1,
+   "desc": "Enables the CHG and DSG FETs not to be forced off during the Delay timer period",
+   "values": [
+    "1 = FETs are not to be forced off during the Delay timer period.",
+    "0 = FETs are forced off during the Delay timer period."
+   ]
+  },
+  {
+   "name": "CHECK_WAKE",
+   "lo": 4,
+   "width": 1,
+   "desc": "Enables option to manage unintended wakeup from SHUTDOWN",
+   "values": [
+    "1 = Enables this option for unintended wakeup",
+    "0 = Disables this option for unintended wakeup"
+   ]
+  },
+  {
+   "name": "EMSHUT_EXIT_COMM",
+   "lo": 3,
+   "width": 1,
+   "desc": "Enables exit from Emergency FET shutdown if valid SMBus communication is received. Valid SMBus communication means a valid gauge address and any command is received (that is, an invalid command with a valid address is OK)",
+   "values": [
+    "1 = Enables valid communication reception based exit from EMSHUT",
+    "0 = Disables valid communication reception based exit from EMSHUT"
+   ]
+  },
+  {
+   "name": "EMSHUT_EXIT_VPACK",
+   "lo": 2,
+   "width": 1,
+   "desc": "Enables exit from Emergency FET shutdown if voltage at PACK pin > Charger Present Threshold for two samples (~2 seconds)",
+   "values": [
+    "1 = Enables PACK voltage based exit from EMSHUT",
+    "0 = Disables PACK voltage based exit from EMSHUT"
+   ]
+  },
+  {
+   "name": "PWR_SAVE_VSHUT",
+   "lo": 1,
+   "width": 1,
+   "desc": "Enables POWER SAVE SHUTDOWN when specific thresholds have been reached",
+   "values": [
+    "1 = Enables POWER SAVE SHUTDOWN",
+    "0 = Disables POWER SAVE SHUTDOWN"
+   ]
+  },
+  {
+   "name": "AUTO_SHIP_EN",
+   "lo": 0,
+   "width": 1,
+   "desc": "Automatically Shut Down for Shipment",
+   "values": [
+    "1 = Enables auto shutdown after the device is in SLEEP mode without communication for a set period of time.",
+    "0 = Disables auto shutdown feature"
+   ]
+  }
+ ],
+ "0x4ACE": [
+  {
+   "name": "RSVD",
+   "lo": 2,
+   "width": 6,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "BTP_POL",
+   "lo": 1,
+   "width": 1,
+   "desc": "Controls polarity of the BTP pin",
+   "values": [
+    "1 = The BTP pin is asserted high when BTP is triggered.",
+    "0 = The BTP pin is asserted low when BTP is triggered (default)."
+   ]
+  },
+  {
+   "name": "BTP_EN",
+   "lo": 0,
+   "width": 1,
+   "desc": "Enables assertion of the BTP pin",
+   "values": [
+    "1 = Enables assertion of the BTP pin when BTP is triggered.",
+    "0 = Disables assertion of the BTP pin when BTP is triggered (default)."
+   ]
+  }
+ ],
+ "0x4B0C": [
+  {
+   "name": "RSVD",
+   "lo": 12,
+   "width": 4,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "LEDONFC",
+   "lo": 11,
+   "width": 1,
+   "desc": "Enables the LED display to stay on showing charge even after full charge (FC) has been achieved. With this bit set, the LED will stay on after FC until the LED FC time has expired",
+   "values": [
+    "1 = Enables LED display functionality after FC until the LED FC time has expired",
+    "0 = Disables LED display functionality after FC until the LED FC time has expired"
+   ]
+  },
+  {
+   "name": "BLINKMIDPT",
+   "lo": 10,
+   "width": 1,
+   "desc": "Enables LED blinking until the midpoint of each LED segment. The blinking occurs between the bottom and the midway point of each programmed segment level, thus providing more granularity as to where the charge level is within that LED segment",
+   "values": [
+    "1 = Enables LED blinking until the midway point of each segment charge levels",
+    "0 = Disables LED blinking until the midway point of each segment charge levels"
+   ]
+  },
+  {
+   "name": "LEDIFCUV",
+   "lo": 9,
+   "width": 1,
+   "desc": "Enables LED display functionality even under CUV conditions without a charger connected (no charging occurring). This option should be used with care so as to not discharge the battery to low",
+   "values": [
+    "1 = Enables LED display functionality even under CUV conditions without a charger connected",
+    "0 = Disables LED display functionality even under CUV conditions without a charger connected"
+   ]
+  },
+  {
+   "name": "LEDPFON",
+   "lo": 8,
+   "width": 1,
+   "desc": "LED in PF mode enable",
+   "values": [
+    "1 = Display available in PF Mode",
+    "0 = Display not available in PF mode (default) LEDC1, LEDC0 (Bit 7, Bit 6): LED current sink 0, 0 = 0.94 mA average LED current (default) 0, 1 = 1.87 mA average LED current 1, 0 = 2.81 mA average LED current 1, 1 = 3.75 mA average LED current LEDPF1, LEDPF0 (Bit 5, Bit 4): LED display PF error code 0, 0 = PF Error Code not available 0, 1 = PF Error Code shown after SOC if DISP is held low for LED hold time (default). 1, 0 = PF Error code shown if the DISP button is pressed (high-to-low transition of the pin is detected). 1, 1 = PF Error Code shown after SOC"
+   ]
+  },
+  {
+   "name": "LEDMODE",
+   "lo": 3,
+   "width": 1,
+   "desc": "LED display capacity selector",
+   "values": [
+    "1 = Display ASOC/DC",
+    "0 = Display RSOC (default)"
+   ]
+  },
+  {
+   "name": "LEDCHG",
+   "lo": 2,
+   "width": 1,
+   "desc": "LED display during charging",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "LEDRCA",
+   "lo": 1,
+   "width": 1,
+   "desc": "Flashing of LED display when [RCA] is set",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "LEDR",
+   "lo": 0,
+   "width": 1,
+   "desc": "LED display activation at exit of device reset",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled"
+   ]
+  }
+ ],
+ "0x4B71": [
+  {
+   "name": "RSVD",
+   "lo": 12,
+   "width": 4,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "TCSETVCT",
+   "lo": 11,
+   "width": 1,
+   "desc": "Enables the TC flag set by primary charge termination",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "FCSETVCT",
+   "lo": 10,
+   "width": 1,
+   "desc": "Enables the FC flag set by primary charge termination",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "RSVD",
+   "lo": 8,
+   "width": 2,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "TCCLEARRSOC",
+   "lo": 7,
+   "width": 1,
+   "desc": "Enables the TC flag clear by RSOC threshold",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "TCSETRSOC",
+   "lo": 6,
+   "width": 1,
+   "desc": "Enables the TC flag set by RSOC threshold",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "TCCLEARV",
+   "lo": 5,
+   "width": 1,
+   "desc": "Enables the TC flag clear by cell voltage threshold",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "TCSETV",
+   "lo": 4,
+   "width": 1,
+   "desc": "Enables the TC flag set by cell voltage threshold",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "TDCLEARRSOC",
+   "lo": 3,
+   "width": 1,
+   "desc": "Enables the TD flag clear by RSOC threshold",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "TDSETRSOC",
+   "lo": 2,
+   "width": 1,
+   "desc": "Enables the TD flag set by RSOC threshold",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "TDCLEARV",
+   "lo": 1,
+   "width": 1,
+   "desc": "Enables the TD flag clear by cell voltage threshold",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "TDSETV",
+   "lo": 0,
+   "width": 1,
+   "desc": "Enables the TD flag set by cell voltage threshold",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  }
+ ],
+ "0x4B73": [
+  {
+   "name": "FCCLEARRSOC",
+   "lo": 7,
+   "width": 1,
+   "desc": "Enables the FC flag clear by RSOC threshold",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "FCSETRSOC",
+   "lo": 6,
+   "width": 1,
+   "desc": "Enables the FC flag set by RSOC threshold",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "FCCLEARV",
+   "lo": 5,
+   "width": 1,
+   "desc": "Enables the FC flag clear by cell voltage threshold",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "FCSETV",
+   "lo": 4,
+   "width": 1,
+   "desc": "Enables the FC flag set by cell voltage threshold",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "FDCLEARRSOC",
+   "lo": 3,
+   "width": 1,
+   "desc": "Enables the FD flag clear by RSOC threshold",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled FDSETRSOC Bit 2: Enables the FD flag set by RSOC threshold",
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "FDCLEARV",
+   "lo": 1,
+   "width": 1,
+   "desc": "Enables the FD flag clear by cell voltage threshold",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "FDSETV",
+   "lo": 0,
+   "width": 1,
+   "desc": "Enables the FD flag set by cell voltage threshold",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  }
+ ],
+ "0x4B9D": [
+  {
+   "name": "DOD_RSCALE_EN",
+   "lo": 15,
+   "width": 1,
+   "desc": "Configures which DOD the new RScale is to be applied",
+   "values": [
+    "1 = The RScale is only applied to DODs higher than the DOD where the RScale was calculated.",
+    "0 = The RScale is applied to all DODs during IT simulations."
+   ]
+  },
+  {
+   "name": "RELAX_SMOOTH_OK",
+   "lo": 14,
+   "width": 1,
+   "desc": "Smooth RSOC during RELAX mode",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "TDELTAV",
+   "lo": 13,
+   "width": 1,
+   "desc": "TURBO mode delta voltage",
+   "values": [
+    "1 = Calculate DeltaVoltage that corresponds to the power spike defined in Min Turbo Power. Must set this flag to 1 to support TURBO mode.",
+    "0 = Use of DeltaVoltage learned as the maximal difference between instantaneous and average voltage (default)."
+   ]
+  },
+  {
+   "name": "SMOOTH",
+   "lo": 12,
+   "width": 1,
+   "desc": "Smooth RSOC",
+   "values": [
+    "1 = Smoothed FullChargeCapacity() and RemainingCapacity() is used (default).",
+    "0 = True FullChargeCapacity() and RemainingCapacity() is used."
+   ]
+  },
+  {
+   "name": "RELAX_JUMP_OK",
+   "lo": 11,
+   "width": 1,
+   "desc": "Allows RSOC jump during RELAX mode",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "DELAY_DROP_TO_0",
+   "lo": 10,
+   "width": 1,
+   "desc": "Delay",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "CELL_TERM",
+   "lo": 9,
+   "width": 1,
+   "desc": "Cell based termination",
+   "values": [
+    "1 = Cell based termination",
+    "0 = Stack voltage based termination (default)"
+   ]
+  },
+  {
+   "name": "FAST_QMAX_FLD",
+   "lo": 8,
+   "width": 1,
+   "desc": "Fast Qmax update in field",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "FAST_QMAX_LRN",
+   "lo": 7,
+   "width": 1,
+   "desc": "Fast Qmax update in learning",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "RSOC_CONV",
+   "lo": 6,
+   "width": 1,
+   "desc": "RSOC convergence (fast scaling)",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "LFP_RELAX",
+   "lo": 5,
+   "width": 1,
+   "desc": "Lithium iron phosphate relax",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "DOD0EW",
+   "lo": 4,
+   "width": 1,
+   "desc": "DOD0 error weighting",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "OCVFR",
+   "lo": 3,
+   "width": 1,
+   "desc": "Open circuit voltage flat region",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "RFACTSTEP",
+   "lo": 2,
+   "width": 1,
+   "desc": "Ra factor step",
+   "values": [
+    "1 = Enabled (default).",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "CSYNC",
+   "lo": 1,
+   "width": 1,
+   "desc": "Sync RemainingCapacity() with FullChargeCapacity() at valid charge termination",
+   "values": [
+    "1 = Synchronized (default)",
+    "0 = Not synchronized"
+   ]
+  },
+  {
+   "name": "CCT",
+   "lo": 0,
+   "width": 1,
+   "desc": "Cycle count threshold",
+   "values": [
+    "1 = Use CC % of FullChargeCapacity()",
+    "0 = Use CC % of DesignCapacity() (default)"
+   ]
+  }
+ ],
+ "0x4BA1": [
+  {
+   "name": "RSVD",
+   "lo": 8,
+   "width": 8,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "TS1/TS0",
+   "lo": 6,
+   "width": 2,
+   "desc": "These two bits are used in conjunction to select which one of the individual temperature sensors (TS 1…4) is used by the IT algorithm",
+   "values": [
+    "1,1 = Not used",
+    "1,0 = Min Temperature is used (IT uses the temperature sensor with the lowest temperature).",
+    "0,1 = Avg Temperature is used (IT uses the average temperature of all 4 temperature sensors).",
+    "0,0 = Max Temperature is used (IT uses the temperature sensor with the highest temperature). (Default)"
+   ]
+  },
+  {
+   "name": "CELL_INTER_IR",
+   "lo": 5,
+   "width": 1,
+   "desc": "Enables the cell interconnect resistance to be used to compensate the cell voltage when cell-based EDV detection is selected (Vs Pack based EDV detection)",
+   "values": [
+    "1 = Enables cell interconnect resistance usage to compensate cell voltage in relation to cell EDV detection",
+    "0 = Disables cell interconnect resistance usage to compensate cell voltage in relation to cell EDV detection"
+   ]
+  },
+  {
+   "name": "THERM_SAT",
+   "lo": 4,
+   "width": 1,
+   "desc": "Thermal saturation enables adjustment of the IT thermal model",
+   "values": [
+    "1 = Enables adjustment of the IT thermal model",
+    "0 = Disables adjustment of the IT thermal model"
+   ]
+  },
+  {
+   "name": "THERM_IV",
+   "lo": 3,
+   "width": 1,
+   "desc": "Enables the freeze of the temperature model at certain points in IT to prevent overestimation by the thermal model",
+   "values": [
+    "1 = Enables the freeze of the temperature model",
+    "0 = Disables the freeze of the temperature model"
+   ]
+  },
+  {
+   "name": "AMB_PRED",
+   "lo": 2,
+   "width": 1,
+   "desc": "Enables ambient temperature prediction in modes other than RELAX",
+   "values": [
+    "1 = Enables ambient temperature prediction",
+    "0 = Disables ambient temperature prediction"
+   ]
+  },
+  {
+   "name": "CHG_100_SMOOTH_OK",
+   "lo": 1,
+   "width": 1,
+   "desc": "Allows smoothing in the charge direction when there is a jump to 100%",
+   "values": [
+    "1 = Enables smoothing to 100%",
+    "0 = Disables smoothing to 100%"
+   ]
+  },
+  {
+   "name": "DSG_0_SMOOTH_OK",
+   "lo": 0,
+   "width": 1,
+   "desc": "Allows smoothing in the discharge direction when there is a jump to 0%. When enabled, this smoothing option must be used in conjunction with Term Smooth Start Cell V Delta, Term Smooth Time, and Term Smooth Final Cell V Delta. If",
+   "values": [
+    "1 = Enables smoothing to 0%",
+    "0 = Disables smoothing to 0%"
+   ]
+  }
+ ],
+ "0x4C90": [
+  {
+   "name": "CYCLE_DEGRADE",
+   "lo": 7,
+   "width": 1,
+   "desc": "Cycle count based charging current or charging voltage degradation",
+   "values": [
+    "1 = Degradation CC/CV based on cycle count",
+    "0 = No degradation of CC/CV based on cycle count"
+   ]
+  },
+  {
+   "name": "SOH_DEGRADE",
+   "lo": 6,
+   "width": 1,
+   "desc": "SOH based charging current or charging voltage degradation",
+   "values": [
+    "1 = Degradation CC/CV based on SOH",
+    "0 = No degradation of CC/CV based on SOH"
+   ]
+  },
+  {
+   "name": "DEGRADE_CC",
+   "lo": 5,
+   "width": 1,
+   "desc": "Enables charging current degradation based on cycle count or SOH",
+   "values": [
+    "1 = Enables charging current degradation",
+    "0 = Disables charging current degradation"
+   ]
+  },
+  {
+   "name": "COMP_IR",
+   "lo": 4,
+   "width": 1,
+   "desc": "Allows IR compensation at the system level to ensure the correct voltage level required for a specific charging voltage at the battery terminals",
+   "values": [
+    "1 = Enables system level IR compensation",
+    "0 = Disables system level IR compensation"
+   ]
+  },
+  {
+   "name": "CS_CV",
+   "lo": 3,
+   "width": 1,
+   "desc": "This enables the cell swelling control under specific cell voltage and cell temperature thresholds by reducing the charging voltage",
+   "values": [
+    "1 = Enables cell swelling control",
+    "0 = Disables cell swelling control"
+   ]
+  },
+  {
+   "name": "SOC_CHARGE",
+   "lo": 2,
+   "width": 1,
+   "desc": "",
+   "values": [
+    "1 = Enables SOC threshold to replace voltage thresholds (CLV, CMV, and CHV) in Advanced Charging Algorithm",
+    "0 = Uses voltage thresholds (CLV, CMV, and CHV) in Advanced Charging Algorithm"
+   ]
+  },
+  {
+   "name": "CCC",
+   "lo": 1,
+   "width": 1,
+   "desc": "",
+   "values": [
+    "1 = Enables charging loss compensation feature",
+    "0 = Charging loss compensation disabled (default)"
+   ]
+  },
+  {
+   "name": "CRATE",
+   "lo": 0,
+   "width": 1,
+   "desc": "ChargeCurrent rate",
+   "values": [
+    "1 = ChargingCurrent() adjusted based on FullChargeCapacity() / DesignCapacity()",
+    "0 = No adjustment to ChargingCurrent() (default)"
+   ]
+  }
+ ],
+ "0x4D01": [
+  {
+   "name": "RSVD",
+   "lo": 5,
+   "width": 3,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "TS4",
+   "lo": 4,
+   "width": 1,
+   "desc": "Enable TS4",
+   "values": [
+    "1 = Enables TS4 (default)",
+    "0 = Disables TS4"
+   ]
+  },
+  {
+   "name": "TS3",
+   "lo": 3,
+   "width": 1,
+   "desc": "Enable TS3",
+   "values": [
+    "1 = Enables TS3 (default)",
+    "0 = Disables TS3"
+   ]
+  },
+  {
+   "name": "TS2",
+   "lo": 2,
+   "width": 1,
+   "desc": "Enable TS2",
+   "values": [
+    "1 = Enables TS2 (default)",
+    "0 = Disables TS2"
+   ]
+  },
+  {
+   "name": "TS1",
+   "lo": 1,
+   "width": 1,
+   "desc": "Enable TS1",
+   "values": [
+    "1 = Enables TS1 (default)",
+    "0 = Disables TS1"
+   ]
+  },
+  {
+   "name": "TSint",
+   "lo": 0,
+   "width": 1,
+   "desc": "Enable internal TS",
+   "values": [
+    "1 = Enables internal TS",
+    "0 = Disables internal TS (default)"
+   ]
+  }
+ ],
+ "0x4D02": [
+  {
+   "name": "RSVD",
+   "lo": 5,
+   "width": 3,
+   "desc": "Reserved. Do not use",
+   "values": [
+    "1 = FET temperature",
+    "0 = Cell temperature (default) TS3 Mode (Bit 3): Cell temperature or FET temperature",
+    "1 = FET temperature",
+    "0 = Cell temperature (default) TS2 Mode (Bit 2): Cell temperature or FET temperature",
+    "1 = FET temperature (default)",
+    "0 = Cell temperature TS1 Mode (Bit 1): Cell temperature or FET temperature",
+    "1 = FET temperature",
+    "0 = Cell temperature (default) TSInt Mode (Bit 0): Cell temperature or FET temperature"
+   ]
+  }
+ ],
+ "0x4D03": [
+  {
+   "name": "CTEMP",
+   "lo": 14,
+   "width": 2,
+   "desc": "Defines which temperature sensor's output is displayed by the SBS Temperature() command 1, 1 = Not used 1, 0 = Minimum temperature 0, 1 = Average temperature 0, 0 = Maximum temperature",
+   "values": []
+  },
+  {
+   "name": "RSVD",
+   "lo": 9,
+   "width": 5,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "EMSHUT_PEXIT_DIS",
+   "lo": 8,
+   "width": 1,
+   "desc": "Disables the SHUTDN pin exit option of the emergency FET shutdown feature (when a high-to-low transition on the SHUTDN pin is detected)",
+   "values": [
+    "1 = Prevents usage of SHUTDN pin as exit option",
+    "0 = Allows usage of SHUTDN pin as an exit option (default)"
+   ]
+  },
+  {
+   "name": "FTEMP",
+   "lo": 7,
+   "width": 1,
+   "desc": "FET temperature protection source",
+   "values": [
+    "1 = Average",
+    "0 = MAX (default)"
+   ]
+  },
+  {
+   "name": "RSVD",
+   "lo": 6,
+   "width": 1,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "EMSHUT_EN",
+   "lo": 5,
+   "width": 1,
+   "desc": "Emergency FET shutdown enable",
+   "values": [
+    "1 = Enables",
+    "0 = Disables"
+   ]
+  },
+  {
+   "name": "SLEEP",
+   "lo": 4,
+   "width": 1,
+   "desc": "SLEEP mode",
+   "values": [
+    "1 = Enables SLEEP mode (default)",
+    "0 = Disables SLEEP mode"
+   ]
+  },
+  {
+   "name": "IN_SYSTEM_SLEEP",
+   "lo": 3,
+   "width": 1,
+   "desc": "In-system SLEEP mode",
+   "values": [
+    "1 = Enables",
+    "0 = Disables (default)"
+   ]
+  },
+  {
+   "name": "NR",
+   "lo": 2,
+   "width": 1,
+   "desc": "Use PRES in system detection",
+   "values": [
+    "1 = NON-REMOVABLE mode",
+    "0 = Use PRES, REMOVABLE mode (default)"
+   ]
+  },
+  {
+   "name": "RSVD",
+   "lo": 0,
+   "width": 2,
+   "desc": "Reserved. Do not use",
+   "values": []
+  }
+ ],
+ "0x4D05": [
+  {
+   "name": "RSVD",
+   "lo": 3,
+   "width": 5,
+   "desc": "Reserved. Do not use",
+   "values": []
+  }
+ ],
+ "0x4B8C": [
+  {
+   "name": "RSVD",
+   "lo": 6,
+   "width": 2,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "CBS",
+   "lo": 5,
+   "width": 1,
+   "desc": "Cell balancing in SLEEP",
+   "values": [
+    "1 = Enables CBS",
+    "0 = Disables CBS"
+   ]
+  },
+  {
+   "name": "CB_RLX_DOD0EW",
+   "lo": 4,
+   "width": 1,
+   "desc": "",
+   "values": [
+    "1 = Enables Error Weighted DOD0 for cell balancing time updates when in RELAX mode",
+    "0 = Uses DOD0 for cell balancing time updates when in RELAX mode"
+   ]
+  },
+  {
+   "name": "CB_CHG_DOD0EW",
+   "lo": 3,
+   "width": 1,
+   "desc": "",
+   "values": [
+    "1 = Enables error weighted DOD0 for cell balancing time updates when in CHARGE mode",
+    "0 = Uses DOD0 for cell balancing time updates when in CHARGE mode"
+   ]
+  },
+  {
+   "name": "CBR",
+   "lo": 2,
+   "width": 1,
+   "desc": "Cell balancing at rest",
+   "values": [
+    "1 = Enables cell balancing at rest",
+    "0 = Disables cell balancing at rest (default)"
+   ]
+  },
+  {
+   "name": "CBM",
+   "lo": 1,
+   "width": 1,
+   "desc": "Internal versus external cell balancing",
+   "values": [
+    "1 = Enables external cell balancing enabled",
+    "0 = Enables internal cell balancing (default)"
+   ]
+  },
+  {
+   "name": "CB",
+   "lo": 0,
+   "width": 1,
+   "desc": "Cell balancing",
+   "values": [
+    "1 = Cell balancing enabled (default)",
+    "0 = Cell balancing disabled"
+   ]
+  }
+ ],
+ "0x4AD5": [
+  {
+   "name": "GPIO_PIN22",
+   "lo": 7,
+   "width": 1,
+   "desc": "GPIO multifunction pin 22 (RL2)",
+   "values": [
+    "1 = The GPIO pin can be controlled and read when the gauge is SEALED.",
+    "0 = The GPIO pin cannot be controlled or read when the gauge is SEALED."
+   ]
+  },
+  {
+   "name": "GPIO_PIN21",
+   "lo": 6,
+   "width": 1,
+   "desc": "GPIO multifunction pin 21 (RL1)",
+   "values": [
+    "1 = The GPIO pin can be controlled and read when the gauge is SEALED.",
+    "0 = The GPIO pin cannot be controlled or read when the gauge is SEALED."
+   ]
+  },
+  {
+   "name": "GPIO_PIN20",
+   "lo": 5,
+   "width": 1,
+   "desc": "GPIO multifunction pin 20 (RL0)",
+   "values": [
+    "1 = The GPIO pin can be controlled and read when the gauge is SEALED.",
+    "0 = The GPIO pin cannot be controlled or read when the gauge is SEALED."
+   ]
+  },
+  {
+   "name": "GPIO_PIN15",
+   "lo": 4,
+   "width": 1,
+   "desc": "GPIO multifunction pin 15 (RH2)",
+   "values": [
+    "1 = The GPIO pin can be controlled and read when the gauge is SEALED.",
+    "0 = The GPIO pin cannot be controlled or read when the gauge is SEALED."
+   ]
+  },
+  {
+   "name": "GPIO_PIN16",
+   "lo": 3,
+   "width": 1,
+   "desc": "GPIO multifunction pin 16 (RH1)",
+   "values": [
+    "1 = The GPIO pin can be controlled and read when the gauge is SEALED.",
+    "0 = The GPIO pin cannot be controlled or read when the gauge is SEALED."
+   ]
+  },
+  {
+   "name": "GPIO_PIN17",
+   "lo": 2,
+   "width": 1,
+   "desc": "GPIO multifunction pin 17 (RH0)",
+   "values": [
+    "1 = The GPIO pin can be controlled and read when the gauge is SEALED.",
+    "0 = The GPIO pin cannot be controlled or read when the gauge is SEALED."
+   ]
+  },
+  {
+   "name": "GPIO_PIN13",
+   "lo": 1,
+   "width": 1,
+   "desc": "GPIO multifunction pin 13 (RC3)",
+   "values": [
+    "1 = The GPIO pin can be controlled and read when the gauge is SEALED.",
+    "0 = The GPIO pin cannot be controlled or read when the gauge is SEALED."
+   ]
+  },
+  {
+   "name": "GPIO_PIN12",
+   "lo": 0,
+   "width": 1,
+   "desc": "GPIO multifunction pin 12 (RC2)",
+   "values": [
+    "1 = The GPIO pin can be controlled and read when the gauge is SEALED.",
+    "0 = The GPIO pin cannot be controlled or read when the gauge is SEALED."
+   ]
+  }
+ ],
+ "0x4BBD": [
+  {
+   "name": "RSVD",
+   "lo": 3,
+   "width": 5,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "CUDEP_REQ_CHG",
+   "lo": 2,
+   "width": 1,
+   "desc": "Forces the charge request to be non-zero during copper deposition check for PFStatus()[CUV]",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "CUV_RECOV_CHG",
+   "lo": 1,
+   "width": 1,
+   "desc": "Requires the charge to recover SafetyStatus()[CUV]",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "SUV_MODE",
+   "lo": 0,
+   "width": 1,
+   "desc": "Checks copper deposition for PFStatus()[CUV]",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  }
+ ],
+ "0x4BBE": [
+  {
+   "name": "AOLDL",
+   "lo": 7,
+   "width": 1,
+   "desc": "Overload in discharge latch",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "RSVD_ONE",
+   "lo": 6,
+   "width": 1,
+   "desc": "Reserved and programmed to 1. Do not use",
+   "values": []
+  },
+  {
+   "name": "OCD2",
+   "lo": 5,
+   "width": 1,
+   "desc": "Overcurrent in discharge 2nd tier",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "OCD1",
+   "lo": 4,
+   "width": 1,
+   "desc": "Overcurrent in discharge 1st tier",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "OCC2",
+   "lo": 3,
+   "width": 1,
+   "desc": "Overcurrent in charge 2nd tier",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "OCC1",
+   "lo": 2,
+   "width": 1,
+   "desc": "Overcurrent in charge 1st tier",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "COV",
+   "lo": 1,
+   "width": 1,
+   "desc": "Cell overvoltage",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "CUV",
+   "lo": 0,
+   "width": 1,
+   "desc": "Cell undervoltage",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  }
+ ],
+ "0x4BBF": [
+  {
+   "name": "RSVD",
+   "lo": 7,
+   "width": 1,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "CUVC",
+   "lo": 6,
+   "width": 1,
+   "desc": "I*R compensated CUV",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "OTD",
+   "lo": 5,
+   "width": 1,
+   "desc": "Overtemperature in discharge",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "OTC",
+   "lo": 4,
+   "width": 1,
+   "desc": "Overtemperature in charge",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "ASCDL",
+   "lo": 3,
+   "width": 1,
+   "desc": "Short circuit in discharge latch",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "RSVD_ONE",
+   "lo": 2,
+   "width": 1,
+   "desc": "Reserved and programmed to 1. Do not use",
+   "values": []
+  },
+  {
+   "name": "ASCCL",
+   "lo": 1,
+   "width": 1,
+   "desc": "Short circuit in charge latch",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "ASCC",
+   "lo": 0,
+   "width": 1,
+   "desc": "Short circuit in charge",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disables the SafetyAlert() and SafetyStatus() flag only and does NOT disable the FET actions."
+   ]
+  }
+ ],
+ "0x4BC0": [
+  {
+   "name": "CHGC",
+   "lo": 7,
+   "width": 1,
+   "desc": "ChargingCurrent() higher than requested",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "OC",
+   "lo": 6,
+   "width": 1,
+   "desc": "Overcharge",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "RSVD",
+   "lo": 5,
+   "width": 1,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "CTO",
+   "lo": 4,
+   "width": 1,
+   "desc": "Charging timeout",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "RSVD",
+   "lo": 3,
+   "width": 1,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "PTO",
+   "lo": 2,
+   "width": 1,
+   "desc": "Precharging timeout",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "HWDF",
+   "lo": 1,
+   "width": 1,
+   "desc": "SBS host watchdog timeout",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "OTF",
+   "lo": 0,
+   "width": 1,
+   "desc": "FET overtemperature",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  }
+ ],
+ "0x4BC1": [
+  {
+   "name": "RSVD",
+   "lo": 6,
+   "width": 2,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "OCDL",
+   "lo": 5,
+   "width": 1,
+   "desc": "Overcurrent in discharge related PF",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "COVL",
+   "lo": 4,
+   "width": 1,
+   "desc": "Cell overvoltage latch related PF",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "UTD",
+   "lo": 3,
+   "width": 1,
+   "desc": "Undertemperature while not charging",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "UTC",
+   "lo": 2,
+   "width": 1,
+   "desc": "Undertemperature while charging",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "PCHGC",
+   "lo": 1,
+   "width": 1,
+   "desc": "ChargingCurrent() higher than requested in precharge",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "CHGV",
+   "lo": 0,
+   "width": 1,
+   "desc": "ChargingVoltage() higher than requested",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  }
+ ],
+ "0x4C45": [
+  {
+   "name": "QIM",
+   "lo": 7,
+   "width": 1,
+   "desc": "QMax imbalance",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "OTF",
+   "lo": 6,
+   "width": 1,
+   "desc": "Overtemperature FET",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "COVL",
+   "lo": 5,
+   "width": 1,
+   "desc": "Cell overvoltage latch",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "SOT",
+   "lo": 4,
+   "width": 1,
+   "desc": "Safety overtemperature",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "SOCD",
+   "lo": 3,
+   "width": 1,
+   "desc": "Safety overcurrent in discharge 1= Enabled",
+   "values": [
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "SOCC",
+   "lo": 2,
+   "width": 1,
+   "desc": "Safety overcurrent in charge 1= Enabled",
+   "values": [
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "SOV",
+   "lo": 1,
+   "width": 1,
+   "desc": "Safety cell overvoltage",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  },
+  {
+   "name": "SUV",
+   "lo": 0,
+   "width": 1,
+   "desc": "Safety cell undervoltage",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled (default)"
+   ]
+  }
+ ],
+ "0x4C46": [
+  {
+   "name": "ASCDL",
+   "lo": 7,
+   "width": 1,
+   "desc": "Short circuit in discharge-PF enable",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "ASCCL",
+   "lo": 6,
+   "width": 1,
+   "desc": "Short circuit in charge-PF enable",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "AOLDL",
+   "lo": 5,
+   "width": 1,
+   "desc": "Overload in discharge-PF enable",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "VIMA",
+   "lo": 4,
+   "width": 1,
+   "desc": "Voltage imbalance active",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "VIMR",
+   "lo": 3,
+   "width": 1,
+   "desc": "Voltage imbalance at rest",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "CD",
+   "lo": 2,
+   "width": 1,
+   "desc": "Capacity degradation",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "IMP",
+   "lo": 1,
+   "width": 1,
+   "desc": "Cell impedance",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "CB",
+   "lo": 0,
+   "width": 1,
+   "desc": "Cell balancing",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled"
+   ]
+  }
+ ],
+ "0x4C47": [
+  {
+   "name": "PTC",
+   "lo": 7,
+   "width": 1,
+   "desc": "Permanent fail flag display",
+   "values": [
+    "1 = Enables PFStatus[PTC] = 1 when PTC fault is triggered. The function should be enabled/disabled by the PTCEN pin connection.",
+    "0 = Disables the PFStatus[PTC] = 1 when PTC fault is triggered. The function should be enabled/disabled by the PTCEN pin connection."
+   ]
+  },
+  {
+   "name": "2LVL",
+   "lo": 6,
+   "width": 1,
+   "desc": "FUSE input indicating fuse trigger by external 2nd level protection",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "AFEC",
+   "lo": 5,
+   "width": 1,
+   "desc": "AFE communication",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "AFER",
+   "lo": 4,
+   "width": 1,
+   "desc": "AFE register",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = n/a"
+   ]
+  },
+  {
+   "name": "FUSE",
+   "lo": 3,
+   "width": 1,
+   "desc": "Fuse",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "OCDL",
+   "lo": 2,
+   "width": 1,
+   "desc": "Overcurrent in discharge-PF enable",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "DFET",
+   "lo": 1,
+   "width": 1,
+   "desc": "Discharge FET",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "CFETF",
+   "lo": 0,
+   "width": 1,
+   "desc": "Charge FET",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  }
+ ],
+ "0x4C48": [
+  {
+   "name": "TS4",
+   "lo": 7,
+   "width": 1,
+   "desc": "",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "TS3",
+   "lo": 6,
+   "width": 1,
+   "desc": "",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "TS2",
+   "lo": 5,
+   "width": 1,
+   "desc": "",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "TS1",
+   "lo": 4,
+   "width": 1,
+   "desc": "",
+   "values": [
+    "1 = Enabled (default)",
+    "0 = Disabled"
+   ]
+  },
+  {
+   "name": "RSVD",
+   "lo": 0,
+   "width": 4,
+   "desc": "Reserved. Do not use",
+   "values": []
+  }
+ ],
+ "0x4D07": [
+  {
+   "name": "RSTRIM",
+   "lo": 4,
+   "width": 4,
+   "desc": "Unsupport function. Should leave the default setting 0x7. Changing this setting may cause an error to the AFE current protection accuracy",
+   "values": []
+  },
+  {
+   "name": "RSVD",
+   "lo": 2,
+   "width": 2,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "SCDDx2",
+   "lo": 1,
+   "width": 1,
+   "desc": "Double SCD delay times",
+   "values": [
+    "1 = 2 × SCD delay times",
+    "0 = Normal SCD delay times (default)"
+   ]
+  },
+  {
+   "name": "RSNS",
+   "lo": 0,
+   "width": 1,
+   "desc": "AOLD, ASCC, ASCD1, ASCD2 thresholds",
+   "values": [
+    "1 = Normal AFE protection thresholds",
+    "0 = 0.5 × AFE protection thresholds (default)"
+   ]
+  }
+ ],
+ "0x4B01": [
+  {
+   "name": "RSVD",
+   "lo": 4,
+   "width": 4,
+   "desc": "Reserved. Do not use",
+   "values": [
+    "1,1 = ±5 mV",
+    "1,0 = ±2.5 mV",
+    "0,1 = ±1.25 mV",
+    "0,0 = ±0.625 mV"
+   ]
+  },
+  {
+   "name": "RSVD",
+   "lo": 0,
+   "width": 2,
+   "desc": "Reserved. Do not use",
+   "values": []
+  }
+ ],
+ "0x44D8": [
+  {
+   "name": "RSVD",
+   "lo": 4,
+   "width": 4,
+   "desc": "Reserved. Do not use",
+   "values": [
+    "1 = Updated",
+    "0 = Not updated"
+   ]
+  },
+  {
+   "name": "Enable",
+   "lo": 2,
+   "width": 1,
+   "desc": "Impedance Track gauging and lifetime updating enable",
+   "values": [
+    "1 = Enabled",
+    "0 = Disabled Update1, Update0 (Bits 1-0): Update Status",
+    "0,0 = Impedance Track gauging and lifetime updating is disabled.",
+    "0,1 = QMax updated",
+    "1,0 = QMax and Ra table have been updated."
+   ]
+  }
+ ],
+ "0x4B2A": [
+  {
+   "name": "CAPM",
+   "lo": 15,
+   "width": 1,
+   "desc": "Capacity_Mode (R/W)",
+   "values": [
+    "1 = Report in 10 mW or cWh",
+    "0 = Report in mA or mAh (default)"
+   ]
+  },
+  {
+   "name": "CHGM",
+   "lo": 14,
+   "width": 1,
+   "desc": "Charger_Mode (R/W)",
+   "values": [
+    "1 = Disables ChargingVoltage() and ChargingCurrent() broadcasts to the host and smart battery charger (default)",
+    "0 = Enables ChargingVoltage() and ChargingCurrent() broadcasts to the host and smart battery charger"
+   ]
+  },
+  {
+   "name": "AM",
+   "lo": 13,
+   "width": 1,
+   "desc": "ALARM Mode (R/W)",
+   "values": [
+    "1 = Disables AlarmWarning() broadcasts to host and smart battery charger",
+    "0 = Enables AlarmWarning() broadcasts to host and smart battery charger (default)"
+   ]
+  },
+  {
+   "name": "RSVD",
+   "lo": 10,
+   "width": 3,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "PB",
+   "lo": 9,
+   "width": 1,
+   "desc": "Primary_Battery (R/W)",
+   "values": [
+    "1 = Battery operating in its primary role",
+    "0 = Battery operating in its secondary role (default)"
+   ]
+  },
+  {
+   "name": "CC",
+   "lo": 8,
+   "width": 1,
+   "desc": "Charge_Controller_Enabled (R/W)",
+   "values": [
+    "1 = Internal charge control enabled",
+    "0 = Internal charge control disabled (default)"
+   ]
+  },
+  {
+   "name": "CF",
+   "lo": 7,
+   "width": 1,
+   "desc": "Condition_Flag (R)",
+   "values": [
+    "1 = Conditioning cycle requested",
+    "0 = Battery OK"
+   ]
+  },
+  {
+   "name": "RSVD",
+   "lo": 2,
+   "width": 5,
+   "desc": "Reserved. Do not use",
+   "values": []
+  },
+  {
+   "name": "PBS",
+   "lo": 1,
+   "width": 1,
+   "desc": "Primary_Battery_Support (R)",
+   "values": [
+    "1 = Primary or secondary battery support",
+    "0 = Function not supported (default)"
+   ]
+  },
+  {
+   "name": "ICC",
+   "lo": 0,
+   "width": 1,
+   "desc": "Internal_Charge_Controller (R)",
+   "values": [
+    "1 = Function supported",
+    "0 = Function not supported (default)"
+   ]
+  }
+ ],
+ "0x4B2C": [
+  {
+   "name": "IPScale",
+   "lo": 12,
+   "width": 4,
+   "desc": "IP Scale Factor",
+   "values": [
+    "0,0,0,0 = Reported currents and capacities scaled by 10E0 except ChargingVoltage() and ChargingCurrent()",
+    "0,0,0,1 = Reported currents and capacities scaled by 10E1 except ChargingVoltage() and ChargingCurrent()",
+    "0,0,1,0 = Reported currents and capacities scaled by 10E2 except ChargingVoltage() and ChargingCurrent()",
+    "0,0,1,1 = Reported currents and capacities scaled by 10E3 except ChargingVoltage() and ChargingCurrent()"
+   ]
+  },
+  {
+   "name": "VScale",
+   "lo": 8,
+   "width": 4,
+   "desc": "Voltage Scale Factor",
+   "values": [
+    "0,0,0,0 = Reported voltages scaled by 10E0",
+    "0,0,0,1 = Reported voltages scaled by 10E1",
+    "0,0,1,0 = Reported voltages scaled by 10E2",
+    "0,0,1,1 = Reported voltages scaled by 10E3"
+   ]
+  },
+  {
+   "name": "Version",
+   "lo": 4,
+   "width": 4,
+   "desc": "Version",
+   "values": [
+    "0,0,0,1 = Version 1.0",
+    "0,0,1,1 = Version 1.1",
+    "0,0,1,1 = Version 1.1 with optional PEC support"
+   ]
+  },
+  {
+   "name": "Revision",
+   "lo": 0,
+   "width": 4,
+   "desc": "Revision",
+   "values": [
+    "0,0,0,1 = Version 1.0 and 1.1 (default)"
+   ]
+  }
+ ]
+}

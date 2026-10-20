@@ -4,6 +4,8 @@
 
 Input:  docs/df_table_4800_0_04.json -- TI SLUUBT5C Table 19-1, one entry per
         BQStudio Data Memory parameter (999 of them).
+        docs/df_bits_4800_0_04.json  -- bit names and meanings of the hex
+        registers, from the TRM's per-parameter sections (trm_parse_bits.py).
 Output: main/df_catalog.h                 writable parameters, for the firmware
         <hero_bms>/lib/ble/df_catalog.dart every parameter, for the app
 
@@ -76,6 +78,7 @@ def writable(p):
 def main():
     doc = json.loads((ROOT / "docs/df_table_4800_0_04.json").read_text(encoding="utf-8"))
     params = doc["params"]
+    bits = json.loads((ROOT / "docs/df_bits_4800_0_04.json").read_text(encoding="utf-8"))
     for p in params:
         p["addr_i"] = int(p["addr"], 16)
         if p["type"].startswith("S"):   # the parser split string defaults at a space
@@ -124,17 +127,29 @@ def main():
         f"/// {len(params)} parameters, {len(w)} of them writable from the app.",
         "const dfParams = <DfParam>[",
     ]
+    def dart_bits(addr):
+        fields = bits.get(addr)
+        if not fields:
+            return ""
+        items = []
+        for b in fields:
+            values = ", ".join(dart_str(v) for v in b["values"])
+            items.append(f"DfBit({dart_str(b['name'])}, {b['lo']}, {b['width']}, "
+                         f"{dart_str(b['desc'])}, [{values}])")
+        return ", bits: [" + ", ".join(items) + "]"
+
     for p in params:
         lo, hi = number(p["min"]), number(p["max"])
         out.append(
             f"  DfParam({dart_str(p['cls'])}, {dart_str(p['sub'])}, 0x{p['addr_i']:04X}, "
             f"{dart_str(p['name'])}, {dart_str(p['type'])}, "
             f"{'null' if lo is None else lo}, {'null' if hi is None else hi}, "
-            f"{dart_str(p['default'])}, {dart_str(p['unit'])}, {'true' if p['writable'] else 'false'}),")
+            f"{dart_str(p['default'])}, {dart_str(p['unit'])}, {'true' if p['writable'] else 'false'}"
+            f"{dart_bits(p['addr'])}),")
     out += ["];", ""]
     (APP / "lib/ble/df_catalog.dart").write_text("\n".join(out), encoding="utf-8", newline="\n")
 
-    print(f"{len(params)} parameters, {len(w)} writable")
+    print(f"{len(params)} parameters, {len(w)} writable, {len(bits)} with bit definitions")
 
 
 if __name__ == "__main__":
