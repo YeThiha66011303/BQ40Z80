@@ -337,7 +337,7 @@ esp_err_t BQ40Z80::getDaConfigurationNR(bool &nr, uint16_t &rawValue) {
     esp_err_t err = readDataFlash(0x4D03, raw, 2);
     if (err != ESP_OK) return err;
     rawValue = (uint16_t)raw[0] | ((uint16_t)raw[1] << 8);
-    nr = (rawValue >> 2) & 1; // Bit 2, confirmed TRM sec 19.2.1.15
+    nr = (rawValue >> 2) & 1; // bit 2
     return ESP_OK;
 }
 
@@ -449,11 +449,7 @@ esp_err_t BQ40Z80::getChemId(uint16_t &chemId) {
     return ESP_OK;
 }
 
-// ---- DeviceChemistry() -- declared previously but never defined --------------
-// -----------------------------------------------------------------------------
-// Standard SBS word getters. These were declared in the header for a long time
-// without being defined, so any call compiled cleanly and then failed at link.
-// -----------------------------------------------------------------------------
+// ---- Standard SBS word getters ---------------------------------------------
 esp_err_t BQ40Z80::getAverageCurrent(int16_t &mA) {
     uint16_t raw = 0;
     esp_err_t err = smbusReadWord(static_cast<uint8_t>(SbsCommand::AverageCurrent), raw);
@@ -564,19 +560,18 @@ esp_err_t BQ40Z80::getDeviceChemistry(char *buf, size_t bufLen) {
 }
 
 // Enabled Protections C (0x4BC0). Bit 6 = OC (Overcharge), bit 7 = CHGC,
-// bit 4 = CTO, bit 2 = PTO, bit 1 = HWDF, bit 0 = OTF. Confirmed vs TRM 19.2.4.4.
+// bit 4 = CTO, bit 2 = PTO, bit 1 = HWDF, bit 0 = OTF.
 esp_err_t BQ40Z80::getEnabledProtectionsC(uint8_t &raw) {
     return readDataFlash(0x4BC0, &raw, 1);
 }
 
-// Mfg Status Init (0x4800), H2. Same bit layout as ManufacturingStatus().
-// Confirmed vs TRM SLUUBT5C sec 16.1 and the data flash table (sec 19).
-// The sole control command. See the header for what it costs.
+// DeviceReset (MAC 0x0041). See the header for what it costs.
 esp_err_t BQ40Z80::deviceReset() {
     return manufacturerAccessSend(
         static_cast<uint16_t>(MfaSubcommand::DeviceReset));
 }
 
+// Mfg Status Init (0x4800), H2. Same bit layout as ManufacturingStatus().
 esp_err_t BQ40Z80::getMfgStatusInit(uint16_t &raw) {
     uint8_t b[2] = {0};
     esp_err_t err = readDataFlash(0x4800, b, 2);
@@ -942,8 +937,6 @@ esp_err_t BQ40Z80::getCounterDecDelayASCD(uint8_t &seconds) {
     return readDataFlash(0x4C02, &seconds, 1);
 }
 
-// reset() removed: read-only driver. Use the RESET button in BQStudio.
-
 esp_err_t BQ40Z80::getOperationStatus(OperationStatus &out) {
     uint8_t raw[4] = {0};
     uint8_t rawLen = 0;
@@ -989,13 +982,10 @@ esp_err_t BQ40Z80::getOperationStatus(OperationStatus &out) {
     return ESP_OK;
 }
 
-// All FET and gauging toggles removed: read-only driver. The MAC subcommand
-// codes stay in the header enum for reference, but nothing here can send them.
-
 // SafetyAlert (0x0050) and SafetyStatus (0x0051) share a bit layout, so both go
 // through the same decode. Alert is asserted while a condition is present but
 // before its delay has elapsed, so it is the early warning that Status is about
-// to trip. Confirmed vs TRM sec 18.1.37 and 18.1.38.
+// to trip.
 esp_err_t BQ40Z80::getSafetyAlert(SafetyStatus &out) {
     return decodeSafetyBits(static_cast<uint16_t>(MfaSubcommand::SafetyAlert), out);
 }
@@ -1264,7 +1254,7 @@ esp_err_t BQ40Z80::readDAStatus1(DAStatus1 &out) {
     if (err != ESP_OK) return err;
 
     out.rawLen = rawLen;
-    if (rawLen < 32) return ESP_ERR_INVALID_SIZE; // shouldn't happen, but guard anyway
+    if (rawLen < 32) return ESP_ERR_INVALID_SIZE;
     memcpy(out.raw, raw, 32);
 
     int16_t *words = reinterpret_cast<int16_t *>(raw);
@@ -1305,7 +1295,7 @@ esp_err_t BQ40Z80::readDAStatus3(DAStatus3 &out) {
     if (err != ESP_OK) return err;
 
     out.rawLen = rawLen;
-    if (rawLen < 18) return ESP_ERR_INVALID_SIZE; // shouldn't happen, but guard anyway
+    if (rawLen < 18) return ESP_ERR_INVALID_SIZE;
     memcpy(out.raw, raw, 18);
 
     int16_t *words = reinterpret_cast<int16_t *>(raw);

@@ -1,5 +1,5 @@
 // =============================================================================
-// Telemetry snapshot -- READ ONLY. See telemetry.h for the threading contract.
+// Telemetry snapshot. See telemetry.h for the threading contract.
 // =============================================================================
 #include "telemetry.h"
 
@@ -250,7 +250,7 @@ void telemetryGetStatic(StaticInfo &out)
 }
 
 // -----------------------------------------------------------------------------
-// Reset -- the only call in this firmware that changes the gauge
+// Gauge reset
 // -----------------------------------------------------------------------------
 static ResetInfo s_reset = {};
 

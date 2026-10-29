@@ -1,13 +1,13 @@
 #pragma once
 // =============================================================================
-// HTTP server -- READ ONLY.
+// HTTP server
 //
-// Two routes, both GET:
-//   /           the dashboard page, embedded in the firmware image
-//   /api/data   the current telemetry snapshot as JSON
+//   GET  /           the dashboard page, embedded in the firmware image
+//   GET  /api/data   the current telemetry snapshot as JSON
+//   POST /api/reset  DeviceReset, behind a confirmation token
 //
-// There is deliberately no route that writes anything to the gauge. The server
-// can only hand out what the poll task has already read.
+// No route changes data flash: the Wi-Fi AP has no authentication, so settings
+// are only written from the passkey-paired app.
 // =============================================================================
 #include "esp_err.h"
 

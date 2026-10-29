@@ -16,8 +16,9 @@
 // Ranges are for this pack's LiFePO4 cells. Before reusing the firmware with
 // another chemistry, revisit kItems in df_settings.cpp.
 //
-// The HTTP dashboard stays read only: the Wi-Fi AP has no authentication. The
-// only way in is the BLE CMD characteristic, which needs a passkey-paired link.
+// The HTTP dashboard cannot change settings: the Wi-Fi AP has no
+// authentication. The only way in is the BLE CMD characteristic, which needs
+// a passkey-paired link.
 // =============================================================================
 #include "BQ40Z80.h"
 #include <cstddef>

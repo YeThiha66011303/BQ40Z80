@@ -1,6 +1,6 @@
 #pragma once
 // =============================================================================
-// Telemetry snapshot -- READ ONLY
+// Telemetry snapshot
 //
 // One FreeRTOS task owns the BQ40Z80 object and is the only thing that touches
 // the SMBus. It writes into a snapshot guarded by a mutex. HTTP handlers copy
@@ -124,7 +124,7 @@ size_t telemetryToJson(char *buf, size_t cap);
 bool telemetryLockBus(uint32_t timeoutMs);
 void telemetryUnlockBus();
 
-// ---- The one state-changing path in this firmware -------------------------
+// ---- Gauge reset -----------------------------------------------------------
 struct ResetInfo {
     bool     everTried;
     uint32_t count;       // resets issued since the ESP32 booted

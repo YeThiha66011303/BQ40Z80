@@ -5,10 +5,11 @@
 // FET toggles, no FET_EN or GAUGE_EN changes, no seal/unseal. Protection and
 // charge control belong entirely to the BQ40Z80's own firmware.
 //
-// The only state changes are user actions from the paired phone app: the
-// guarded DeviceReset, and writes to a fixed list of data flash settings with
-// range checks and read-back verification (df_settings.cpp). The web
-// dashboard stays read only.
+// The only state changes are user actions:
+//   - DeviceReset, behind a confirmation, from the app, the web page or the
+//     serial console;
+//   - data flash settings, from the passkey-paired app only, with range checks
+//     and read-back verification (df_settings.cpp).
 //
 // NOTE ON "WRITES": reading a ManufacturerAccess block (DAStatus, OperationStatus,
 // SafetyStatus, GaugingStatus, QMax, ...) requires writing the 2-byte subcommand
