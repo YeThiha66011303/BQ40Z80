@@ -1,21 +1,5 @@
 // =============================================================================
 // BQ40Z80 monitor
-//
-// This firmware never changes the state of the gauge on its own. It issues no
-// FET toggles, no FET_EN or GAUGE_EN changes, no seal/unseal. Protection and
-// charge control belong entirely to the BQ40Z80's own firmware.
-//
-// The only state changes are user actions:
-//   - DeviceReset, behind a confirmation, from the app, the web page or the
-//     serial console;
-//   - data flash settings, from the passkey-paired app only, with range checks
-//     and read-back verification (df_settings.cpp).
-//
-// NOTE ON "WRITES": reading a ManufacturerAccess block (DAStatus, OperationStatus,
-// SafetyStatus, GaugingStatus, QMax, ...) requires writing the 2-byte subcommand
-// to ManufacturerBlockAccess (0x44) before reading the payload back from
-// ManufacturerData (0x23). That write is part of the read transaction and does
-// not alter device state. It is not a control command.
 // =============================================================================
 #include "BQ40Z80.h"
 #include "ble_server.h"
@@ -251,11 +235,6 @@ static void logLiveData(BQ40Z80 &gauge)
 
 // =============================================================================
 // Serial commands
-//
-// Typed into the ESP-IDF monitor. Reset is two steps on purpose: "reset"
-// explains what it will cost and arms a short window, "yes" inside that window
-// actually sends it. That mirrors the confirm dialog on the web page, so
-// neither route can fire on a single keystroke.
 // =============================================================================
 #define CONFIRM_WINDOW_US (30LL * 1000000)
 
@@ -325,11 +304,11 @@ static void serialCommandTask(void *)
 
     for (;;) {
         int c = fgetc(stdin);
-        if (c == EOF) {                 // console VFS is non-blocking
+        if (c == EOF) {                
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
-        if (c == '\r' || c == '\n') {   // monitors send either
+        if (c == '\r' || c == '\n') {   
             line[n] = '\0';
             if (n > 0) handleCommand(line);
             n = 0;
@@ -341,8 +320,7 @@ static void serialCommandTask(void *)
 
 extern "C" void app_main(void)
 {
-    // Static storage: the polling task keeps a pointer to this object for the
-    // life of the firmware, so it must outlive app_main's stack frame.
+
     static BQ40Z80 gauge(SCL_PIN, SDA_PIN, I2C_NUM_0);
 
     esp_err_t err = gauge.begin();
@@ -352,9 +330,6 @@ extern "C" void app_main(void)
     }
     ESP_LOGI(TAG, "BQ40Z80 monitor started (settings change only from the paired app)");
 
-    // Network first. The dashboard is the main way to see what the pack is
-    // doing, including the case where the pack is not answering at all, so it
-    // must not sit behind a probe that can take half a minute to give up.
     telemetryInit(&gauge);
     dfSettingsInit(&gauge);
     if (!telemetryStart()) {
@@ -364,8 +339,6 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(wifiApStart());
     ESP_ERROR_CHECK(httpServerStart());
 
-    // BLE after Wi-Fi: it relies on the NVS partition wifiApStart() opened.
-    // A BLE failure leaves the web dashboard running rather than halting.
     if (bleServerStart() != ESP_OK) {
         ESP_LOGE(TAG, "BLE failed to start -- web dashboard only");
     }
@@ -373,8 +346,6 @@ extern "C" void app_main(void)
     xTaskCreate(serialCommandTask, "serial_cmd", 4096, nullptr, 3, nullptr);
     ESP_LOGI(TAG, "serial commands ready -- type 'help'");
 
-    // The first MAC read after power-up often times out while the gauge wakes.
-    // Retry rather than giving up, but never write anything to provoke it.
     ManufacturingStatus probe = {};
     for (int attempt = 1; attempt <= 40; attempt++) {
         bool ok = false;
@@ -401,7 +372,6 @@ extern "C" void app_main(void)
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(SERIAL_LOG_INTERVAL_MS));
 
-        // A pack plugged in after boot should still fill in the device panel.
         if (!staticRead) {
             Telemetry t;
             telemetryGet(t);
